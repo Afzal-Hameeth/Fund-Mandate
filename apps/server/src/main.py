@@ -1,12 +1,11 @@
 import sys
 from pathlib import Path
-from pydantic import BaseModel
 
 src_path = Path(__file__).parent
 sys.path.insert(0, str(src_path))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fundMandate import query_agent
+from fundMandate import router
 
 
 app = FastAPI(
@@ -22,34 +21,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-class QueryRequest(BaseModel):
-
-    content: str
-
-
-class QueryResponse(BaseModel):
-
-    response: str
-    status: str
-
-
-@app.get("/")
-async def root():
-    return {"message": "Agent Platform API is running!"}
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "service": "Agent Platform API"}
-
-@app.post("/chat")
-async def chat(request: QueryRequest) -> QueryResponse:
-
-    result = query_agent(request.content)
-    return QueryResponse(
-        response=result["response"],
-        status=result["status"]
-    )
+app.include_router(router)
 
 if __name__ == "__main__":
     import uvicorn

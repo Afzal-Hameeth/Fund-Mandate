@@ -1,14 +1,27 @@
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import ListSortOrder
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 
 PROJECT_ENDPOINT = "https://fstoaihub1292141971.services.ai.azure.com/api/projects/fstoaihub1292141971-AgentsSample"
 AGENT_ID = "asst_Nm4bdHLpmI2W2VdwT2lF1Jr8"
 
 
-def get_project_client():
+class QueryRequest(BaseModel):
+    content: str
 
+
+class QueryResponse(BaseModel):
+    response: str
+    status: str
+
+
+router = APIRouter()
+
+
+def get_project_client():
     try:
         client = AIProjectClient(
             credential=DefaultAzureCredential(),
@@ -21,7 +34,6 @@ def get_project_client():
 
 
 def query_agent(user_content: str) -> dict:
-
     project = get_project_client()
     
     if not project:
@@ -31,36 +43,30 @@ def query_agent(user_content: str) -> dict:
         }
     
     try:
-
         thread = project.agents.threads.create()
         
-
         project.agents.messages.create(
             thread_id=thread.id,
             role="user",
             content=user_content
         )
         
-
         run = project.agents.runs.create_and_process(
             thread_id=thread.id,
             agent_id=AGENT_ID
         )
         
-
         if run.status == "failed":
             return {
                 "response": f"Agent run failed: {run.last_error}",
                 "status": "error"
             }
         
-
         messages = project.agents.messages.list(
             thread_id=thread.id,
             order=ListSortOrder.ASCENDING
         )
         
-
         agent_response = None
         for message in messages:
             if message.role == "assistant" and message.text_messages:
@@ -82,3 +88,15 @@ def query_agent(user_content: str) -> dict:
             "response": f"Error processing query: {str(e)}",
             "status": "error"
         }
+
+
+@router.post("/chat", response_model=QueryResponse)
+async def chat(request: QueryRequest) -> QueryResponse:
+    """
+    Send a query to the Azure agent and get a response
+    """
+    result = query_agent(request.content)
+    return QueryResponse(
+        response=result["response"],
+        status=result["status"]
+    )
