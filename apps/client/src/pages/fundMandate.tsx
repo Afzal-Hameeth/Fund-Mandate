@@ -5,7 +5,6 @@ const FundMandate: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
   const [errors, setErrors] = useState<{ file?: string; description?: string }>({});
 
   const validateFile = (file: File) => {
@@ -13,46 +12,21 @@ const FundMandate: React.FC = () => {
     const maxSize = 10 * 1024 * 1024; // 10MB
 
     if (!allowedTypes.includes(file.type)) {
-      return 'Only PDF files are allowed';
+      return false;
     }
     if (file.size > maxSize) {
-      return 'File size must be less than 10MB';
+      return false;
     }
-    return null;
+    return true;
   };
 
   const handleFileSelect = (file: File) => {
-    const error = validateFile(file);
-    if (error) {
-      setErrors((prev) => ({ ...prev, file: error }));
-      return;
+    if (validateFile(file)) {
+      setSelectedFile(file);
+      setErrors((prev) => ({ ...prev, file: undefined }));
+    } else {
+      setErrors((prev) => ({ ...prev, file: 'Only PDF files up to 10MB are allowed' }));
     }
-
-    setSelectedFile(file);
-    setErrors((prev) => ({ ...prev, file: undefined }));
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-
-    const files = e.dataTransfer.files;
-    if (files && files[0]) {
-      handleFileSelect(files[0]);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,6 +34,7 @@ const FundMandate: React.FC = () => {
     if (files && files[0]) {
       handleFileSelect(files[0]);
     }
+    e.target.value = '';
   };
 
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -184,27 +159,19 @@ const FundMandate: React.FC = () => {
                 Upload Fund Mandate PDF
               </label>
 
-              <div
-                className={`relative border-2 border-dashed rounded-xl p-6 text-center transition-all duration-200 ${
-                  dragActive
-                    ? 'border-indigo-400 bg-indigo-50 scale-[1.02]'
-                    : selectedFile
-                    ? 'border-indigo-400 bg-indigo-50'
-                    : 'border-gray-300 hover:border-indigo-400 hover:bg-gray-50'
-                }`}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-              >
+              <div className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                selectedFile
+                  ? 'border-indigo-400 bg-indigo-50'
+                  : 'border-gray-300 hover:border-indigo-400'
+              }`}>
                 <input
                   type="file"
                   accept=".pdf"
                   onChange={handleFileInput}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  disabled={isSubmitting}
+                  className="hidden"
                   id="fund-mandate-upload"
+                  disabled={isSubmitting}
                 />
-
                 <label
                   htmlFor="fund-mandate-upload"
                   className={`cursor-pointer ${isSubmitting ? 'cursor-not-allowed opacity-50' : ''}`}
@@ -225,7 +192,7 @@ const FundMandate: React.FC = () => {
                       <>
                         <FiUpload size={32} className="text-gray-400 mb-3" />
                         <p className="text-sm font-medium text-gray-900 mb-1">
-                          Drop your PDF here, or click to browse
+                          Click to upload or drag and drop
                         </p>
                         <p className="text-xs text-gray-500">
                           PDF files only, up to 10MB
