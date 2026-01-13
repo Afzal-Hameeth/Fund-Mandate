@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FiUpload, FiFileText, FiSend, FiFile } from 'react-icons/fi';
+import { FiUpload, FiFileText, FiSend, FiFile, FiTrash } from 'react-icons/fi';
 
 const FundMandate: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -189,7 +189,7 @@ const FundMandate: React.FC = () => {
                   dragActive
                     ? 'border-indigo-400 bg-indigo-50 scale-[1.02]'
                     : selectedFile
-                    ? 'border-green-400 bg-green-50'
+                    ? 'border-indigo-400 bg-indigo-50'
                     : 'border-gray-300 hover:border-indigo-400 hover:bg-gray-50'
                 }`}
                 onDrop={handleDrop}
@@ -212,21 +212,14 @@ const FundMandate: React.FC = () => {
                   <div className="flex flex-col items-center">
                     {selectedFile ? (
                       <>
-                        <FiFileText size={40} className="text-green-500 mb-3" />
+                        <FiFileText size={40} className="text-indigo-500 mb-3" />
                         <p className="text-sm font-medium text-gray-900 mb-1">
                           {selectedFile.name}
                         </p>
                         <p className="text-xs text-gray-500 mb-2">
                           {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedFile(null)}
-                          className="text-xs text-red-600 hover:text-red-800 hover:underline transition-colors"
-                          disabled={isSubmitting}
-                        >
-                          Remove file
-                        </button>
+                        
                       </>
                     ) : (
                       <>
@@ -250,12 +243,30 @@ const FundMandate: React.FC = () => {
               )}
 
               {selectedFile && !errors.file && (
-                <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg">
-                  <div className="flex items-center">
-                    <FiFileText className="w-4 h-4 text-green-600 mr-2" />
-                    <span className="text-green-700 text-sm font-medium">
-                      File ready for upload
-                    </span>
+                <div className="mt-2 p-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <FiFileText className="w-4 h-4 text-indigo-600 mr-2" />
+                      <span className="text-indigo-700 text-sm font-medium">
+                        {selectedFile.name} uploaded
+                      </span>
+                    </div>
+                    <div className="flex items-center ml-4">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setSelectedFile(null);
+                          setErrors((prev) => ({ ...prev, file: undefined }));
+                        }}
+                        aria-label="Remove file"
+                        className="text-red-600 hover:text-red-800 transition-colors p-1 rounded"
+                        disabled={isSubmitting}
+                      >
+                        <FiTrash className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
