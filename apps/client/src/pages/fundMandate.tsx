@@ -1,18 +1,35 @@
 import React, { useState } from 'react';
-import { FiUpload, FiFileText, FiSend } from 'react-icons/fi';
+import { FiUpload, FiFileText, FiSend, FiFile } from 'react-icons/fi';
 
 const FundMandate: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [errors, setErrors] = useState<{ file?: string; description?: string }>({});
+
+  const validateFile = (file: File) => {
+    const allowedTypes = ['application/pdf'];
+    const maxSize = 10 * 1024 * 1024; // 10MB
+
+    if (!allowedTypes.includes(file.type)) {
+      return 'Only PDF files are allowed';
+    }
+    if (file.size > maxSize) {
+      return 'File size must be less than 10MB';
+    }
+    return null;
+  };
 
   const handleFileSelect = (file: File) => {
-    if (file.type === 'application/pdf') {
-      setSelectedFile(file);
-    } else {
-      alert('Please select a PDF file only.');
+    const error = validateFile(file);
+    if (error) {
+      setErrors((prev) => ({ ...prev, file: error }));
+      return;
     }
+
+    setSelectedFile(file);
+    setErrors((prev) => ({ ...prev, file: undefined }));
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -45,10 +62,27 @@ const FundMandate: React.FC = () => {
     }
   };
 
+  const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setDescription(e.target.value);
+    setErrors((prev) => ({ ...prev, description: undefined }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedFile || !description.trim()) {
-      alert('Please select a PDF file and provide a description.');
+
+    // Validation
+    const newErrors: { file?: string; description?: string } = {};
+
+    if (!selectedFile) {
+      newErrors.file = 'Please select a PDF file';
+    }
+
+    if (!description.trim()) {
+      newErrors.description = 'Please provide a description';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
       return;
     }
 
@@ -57,7 +91,7 @@ const FundMandate: React.FC = () => {
     try {
       // TODO: Implement file upload to backend
       console.log('Submitting:', {
-        file: selectedFile.name,
+        file: selectedFile!.name,
         description: description.trim(),
       });
 
@@ -67,6 +101,7 @@ const FundMandate: React.FC = () => {
       alert('Fund mandate submitted successfully!');
       setSelectedFile(null);
       setDescription('');
+      setErrors({});
     } catch (error) {
       console.error('Error submitting fund mandate:', error);
       alert('Failed to submit fund mandate. Please try again.');
@@ -75,59 +110,119 @@ const FundMandate: React.FC = () => {
     }
   };
 
+  const canSubmit = !isSubmitting && selectedFile && description.trim() && !errors.file && !errors.description;
+
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <h1 className="text-xl font-bold">Fund Mandate</h1>
-        <p className="text-xs text-muted-foreground">Upload and process fund mandate documents</p>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {/* PDF Upload Section */}
+      <header className="border-b sticky top-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-50">
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  Upload Fund Mandate PDF
-                </label>
+                <h1 className="text-xl font-bold">Fund Mandate</h1>
+                <p className="text-xs text-muted-foreground">
+                  Upload and process fund mandate documents
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
 
-                <div
-                  className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                    dragActive
-                      ? 'border-indigo-400 bg-indigo-50'
-                      : selectedFile
-                      ? 'border-green-400 bg-green-50'
-                      : 'border-gray-300 hover:border-gray-400'
-                  }`}
-                  onDrop={handleDrop}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
+      {/* Main Content */}
+      <div className="flex flex-col md:flex-row gap-8 px-8 py-8 mb-8">
+        {/* Left: Info Card */}
+        <div className="flex flex-col gap-3 md:w-1/3">
+          <div className="p-4 border border-indigo-200 rounded-xl bg-gradient-to-br from-indigo-50 via-white to-indigo-50/50 shadow-sm hover:shadow-md transition-all duration-300">
+            <div className="flex items-start mb-3">
+              <div className="p-2 bg-indigo-100 rounded-xl mr-3 shadow-sm">
+                <FiFile className="w-5 h-5 text-indigo-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">Fund Mandate PDF</h3>
+                <p className="text-sm text-indigo-600 font-medium">Document Upload</p>
+              </div>
+            </div>
+
+            <p className="text-gray-600 text-sm leading-relaxed mb-3">
+              Upload your fund mandate documents in PDF format. Provide a clear description to help our AI agent understand the context and requirements.
+            </p>
+
+            <div className="bg-white/70 rounded-lg p-3 border border-indigo-100 mb-3">
+              <div className="flex items-center mb-2">
+                <div className="w-2 h-2 bg-indigo-500 rounded-full mr-2"></div>
+                <p className="text-sm font-semibold text-gray-800">Requirements</p>
+              </div>
+              <div className="space-y-1 text-sm text-gray-600">
+                <div className="flex items-center">
+                  <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full mr-3 flex-shrink-0"></span>
+                  <span>PDF files only</span>
+                </div>
+                <div className="flex items-center">
+                  <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full mr-3 flex-shrink-0"></span>
+                  <span>Clear description required</span>
+                </div>
+              </div>
+            </div>
+
+            {/*<div className="p-2 bg-indigo-50 rounded-lg border border-indigo-200">
+              <p className="text-xs text-indigo-700 font-medium flex items-center">
+                <FiFile className="w-3 h-3 mr-2" />
+                Secure processing with AI analysis
+              </p>
+            </div>*/}
+          </div>
+        </div>
+
+        {/* Right: Upload Form */}
+        <div className="flex-1 max-w-2xl">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* PDF Upload Section */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Upload Fund Mandate PDF
+              </label>
+
+              <div
+                className={`relative border-2 border-dashed rounded-xl p-6 text-center transition-all duration-200 ${
+                  dragActive
+                    ? 'border-indigo-400 bg-indigo-50 scale-[1.02]'
+                    : selectedFile
+                    ? 'border-green-400 bg-green-50'
+                    : 'border-gray-300 hover:border-indigo-400 hover:bg-gray-50'
+                }`}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+              >
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleFileInput}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  disabled={isSubmitting}
+                  id="fund-mandate-upload"
+                />
+
+                <label
+                  htmlFor="fund-mandate-upload"
+                  className={`cursor-pointer ${isSubmitting ? 'cursor-not-allowed opacity-50' : ''}`}
                 >
-                  <input
-                    type="file"
-                    accept=".pdf"
-                    onChange={handleFileInput}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    disabled={isSubmitting}
-                  />
-
                   <div className="flex flex-col items-center">
                     {selectedFile ? (
                       <>
-                        <FiFileText size={48} className="text-green-500 mb-4" />
+                        <FiFileText size={40} className="text-green-500 mb-3" />
                         <p className="text-sm font-medium text-gray-900 mb-1">
                           {selectedFile.name}
                         </p>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-gray-500 mb-2">
                           {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
                         </p>
                         <button
                           type="button"
                           onClick={() => setSelectedFile(null)}
-                          className="mt-3 text-sm text-red-600 hover:text-red-800"
+                          className="text-xs text-red-600 hover:text-red-800 hover:underline transition-colors"
                           disabled={isSubmitting}
                         >
                           Remove file
@@ -135,7 +230,7 @@ const FundMandate: React.FC = () => {
                       </>
                     ) : (
                       <>
-                        <FiUpload size={48} className="text-gray-400 mb-4" />
+                        <FiUpload size={32} className="text-gray-400 mb-3" />
                         <p className="text-sm font-medium text-gray-900 mb-1">
                           Drop your PDF here, or click to browse
                         </p>
@@ -145,54 +240,74 @@ const FundMandate: React.FC = () => {
                       </>
                     )}
                   </div>
-                </div>
-              </div>
-
-              {/* Description Section */}
-              <div>
-                <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-3">
-                  Description
                 </label>
-                <textarea
-                  id="description"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Provide a description for this fund mandate..."
-                  className="w-full resize-none rounded-lg border border-gray-300 px-4 py-3 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[120px]"
-                  disabled={isSubmitting}
-                  required
-                />
-                <p className="text-xs text-gray-500 mt-2">
-                  Describe the fund mandate requirements, objectives, or any specific instructions.
-                </p>
               </div>
 
-              {/* Submit Button */}
-              <div className="flex justify-end pt-2">
-                <button
-                  type="submit"
-                  disabled={!selectedFile || !description.trim() || isSubmitting}
-                  className={`px-6 py-2.5 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 ${
-                    selectedFile && description.trim() && !isSubmitting
-                      ? 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-md focus:bg-indigo-700 active:scale-95'
-                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      <FiSend size={16} />
-                      Submit Fund Mandate
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
+              {errors.file && (
+                <div className="p-2 bg-red-50 border border-red-200 rounded-lg mt-2">
+                  <p className="text-red-600 text-sm">{errors.file}</p>
+                </div>
+              )}
+
+              {selectedFile && !errors.file && (
+                <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center">
+                    <FiFileText className="w-4 h-4 text-green-600 mr-2" />
+                    <span className="text-green-700 text-sm font-medium">
+                      File ready for upload
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Description Section */}
+            <div>
+              <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+                Description
+              </label>
+              <textarea
+                id="description"
+                value={description}
+                onChange={handleDescriptionChange}
+                placeholder="Provide a detailed description of this fund mandate, including objectives, requirements, and any specific instructions..."
+                className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[80px] text-sm"
+                disabled={isSubmitting}
+                required
+              />
+
+              {errors.description && (
+                <div className="p-2 bg-red-50 border border-red-200 rounded-lg mt-2">
+                  <p className="text-red-600 text-sm">{errors.description}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Submit Button */}
+            <div className="flex justify-end pt-3">
+              <button
+                type="submit"
+                disabled={!canSubmit}
+                className={`px-6 py-2 rounded-lg font-semibold transition-all duration-200 flex items-center gap-2 ${
+                  canSubmit
+                    ? 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-lg focus:bg-indigo-700 active:scale-95'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {isSubmitting ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <FiSend size={18} />
+                    Submit
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
