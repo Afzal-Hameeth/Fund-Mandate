@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation, NavLink } from 'react-router-dom';
-import { FiHome, FiLayers, FiEye, FiChevronLeft, FiChevronRight, FiFileText } from 'react-icons/fi';
+import {useLocation, NavLink } from 'react-router-dom';
+import {FiLayers, FiChevronLeft, FiChevronRight, FiFileText } from 'react-icons/fi';
 
 const Sidebar: React.FC = () => {
-  const navigate = useNavigate();
+ 
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+
 
   const navItems = [
     { label: 'Agents', path: '/', icon: FiLayers },
