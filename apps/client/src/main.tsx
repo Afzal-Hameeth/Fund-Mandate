@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import './index.css'
 import DashLayout from './layouts/DashLayout';
 import Agent from './pages/agent';
+import FundMandate from './pages/fundMandate';
 import Error from './pages/Error';
 
 
@@ -16,6 +17,11 @@ const router = createBrowserRouter([
       {
         index: true,
         element: <Agent />,
+        errorElement: <Error />,
+      },
+      {
+        path: 'fund-mandate',
+        element: <FundMandate />,
         errorElement: <Error />,
       },
     ],

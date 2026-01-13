@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation, NavLink } from 'react-router-dom';
-import { FiHome, FiLayers, FiEye, FiChevronLeft, FiChevronRight } from 'react-icons/fi';
+import { FiHome, FiLayers, FiEye, FiChevronLeft, FiChevronRight, FiFileText } from 'react-icons/fi';
 
 const Sidebar: React.FC = () => {
   const navigate = useNavigate();
@@ -9,9 +9,8 @@ const Sidebar: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
 
   const navItems = [
-//     { label: 'Dashboard', path: '/', icon: FiHome },
     { label: 'Agents', path: '/', icon: FiLayers },
-//     { label: 'Settings', path: '/settings', icon: FiEye },
+    { label: 'Fund Mandate', path: '/fund-mandate', icon: FiFileText },
   ];
 
   return (
