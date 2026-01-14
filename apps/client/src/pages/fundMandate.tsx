@@ -1,10 +1,15 @@
 import React, { useState } from 'react';
-import { FiUpload, FiFileText, FiSend, FiFile, FiTrash } from 'react-icons/fi';
+import { API } from '../utils/constants';
+import { FiUpload, FiFileText, FiSend, FiFile, FiTrash, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 
 const FundMandate: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [parsedResult, setParsedResult] = useState<any | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
   const [errors, setErrors] = useState<{ file?: string; description?: string }>({});
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     sourcing: true,
@@ -24,21 +29,47 @@ const FundMandate: React.FC = () => {
     const maxSize = 10 * 1024 * 1024; // 10MB
 
     if (!allowedTypes.includes(file.type)) {
-      return false;
+      return 'Only PDF files are allowed';
     }
     if (file.size > maxSize) {
-      return false;
+      return 'File size must be less than 10MB';
     }
-    return true;
+    return null;
   };
 
   const handleFileSelect = (file: File) => {
-    if (validateFile(file)) {
-      setSelectedFile(file);
-      setErrors((prev) => ({ ...prev, file: undefined }));
-    } else {
-      setErrors((prev) => ({ ...prev, file: 'Only PDF files up to 10MB are allowed' }));
+    const error = validateFile(file);
+    if (error) {
+      setErrors((prev) => ({ ...prev, file: error }));
+      return;
     }
+
+    setSelectedFile(file);
+    setErrors((prev) => ({ ...prev, file: undefined }));
+    setIsSubmitted(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files[0]) {
+      handleFileSelect(files[0]);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,7 +77,6 @@ const FundMandate: React.FC = () => {
     if (files && files[0]) {
       handleFileSelect(files[0]);
     }
-    e.target.value = '';
   };
 
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -76,25 +106,38 @@ const FundMandate: React.FC = () => {
 
     setIsSubmitting(true);
     setIsSubmitted(false);
+    setParsedResult(null);
+    setApiError(null);
 
     try {
-      // TODO: Implement file upload to backend
-      console.log('Submitting:', {
-        file: selectedFile!.name,
-        description: description.trim(),
+      // Prepare multipart form data expected by backend
+      const formData = new FormData();
+      formData.append('pdf', selectedFile as File);
+      formData.append('query', description.trim());
+
+      const resp = await fetch(`${API.BASE_URL()}${API.ENDPOINTS.FUND_MANDATE.PARSE()}`, {
+        method: 'POST',
+        body: formData,
       });
 
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `API error: ${resp.status}`);
+      }
 
-      alert('Fund mandate submitted successfully!');
+      const data = await resp.json();
+
+      // Store parsed result and show UI
+      setParsedResult(data);
       setSelectedFile(null);
       setDescription('');
       setErrors({});
       setIsSubmitted(true);
     } catch (error) {
       console.error('Error submitting fund mandate:', error);
-      alert('Failed to submit fund mandate. Please try again.');
+      const message = (error as any)?.message || 'Failed to submit fund mandate. Please try again.';
+      setApiError(message);
+      alert(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -142,7 +185,7 @@ const FundMandate: React.FC = () => {
 
               <div className="bg-white/70 rounded-lg p-3 border border-indigo-100 mb-3">
                 <div className="flex items-center mb-2">
-                  <div className="w-2 h-2 bg-indigo-500 rounded-full mr-2"></div>
+                  
                   <p className="text-sm font-semibold text-gray-800">Requirements</p>
                 </div>
                 <div className="space-y-1 text-sm text-gray-600">
@@ -168,49 +211,56 @@ const FundMandate: React.FC = () => {
                   Upload Fund Mandate PDF
                 </label>
 
-              <div className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
-                selectedFile
-                  ? 'border-indigo-400 bg-indigo-50'
-                  : 'border-gray-300 hover:border-indigo-400'
-              }`}>
-                <input
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileInput}
-                  className="hidden"
-                  id="fund-mandate-upload"
-                  disabled={isSubmitting}
-                />
-                <label
-                  htmlFor="fund-mandate-upload"
-                  className={`cursor-pointer ${isSubmitting ? 'cursor-not-allowed opacity-50' : ''}`}
+                <div
+                  className={`relative border-2 border-dashed rounded-xl p-6 text-center transition-all duration-200 ${dragActive
+                    ? 'border-indigo-400 bg-indigo-50 scale-[1.02]'
+                    : selectedFile
+                      ? 'border-indigo-400 bg-indigo-50'
+                      : 'border-gray-300 hover:border-indigo-400 hover:bg-gray-50'
+                    }`}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
                 >
-                  <div className="flex flex-col items-center">
-                    {selectedFile ? (
-                      <>
-                        <FiFileText size={40} className="text-indigo-500 mb-3" />
-                        <p className="text-sm font-medium text-gray-900 mb-1">
-                          {selectedFile.name}
-                        </p>
-                        <p className="text-xs text-gray-500 mb-2">
-                          {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                        </p>
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleFileInput}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    disabled={isSubmitting}
+                    id="fund-mandate-upload"
+                  />
 
-                      </>
-                    ) : (
-                      <>
-                        <FiUpload size={32} className="text-gray-400 mb-3" />
-                        <p className="text-sm font-medium text-gray-900 mb-1">
-                          Click to upload or drag and drop
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          PDF files only, up to 10MB
-                        </p>
-                      </>
-                    )}
-                  </div>
-                </label>
-              </div>
+                  <label
+                    htmlFor="fund-mandate-upload"
+                    className={`cursor-pointer ${isSubmitting ? 'cursor-not-allowed opacity-50' : ''}`}
+                  >
+                    <div className="flex flex-col items-center">
+                      {selectedFile ? (
+                        <>
+                          <FiFileText size={40} className="text-indigo-500 mb-3" />
+                          <p className="text-sm font-medium text-gray-900 mb-1">
+                            {selectedFile.name}
+                          </p>
+                          <p className="text-xs text-gray-500 mb-2">
+                            {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+
+                        </>
+                      ) : (
+                        <>
+                          <FiUpload size={32} className="text-gray-400 mb-3" />
+                          <p className="text-sm font-medium text-gray-900 mb-1">
+                            Drop your PDF here, or click to browse
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            PDF files only, up to 10MB
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  </label>
+                </div>
 
                 {errors.file && (
                   <div className="p-2 bg-red-50 border border-red-200 rounded-lg mt-2">
@@ -303,12 +353,24 @@ const FundMandate: React.FC = () => {
             <div className="max-w-4xl mx-auto space-y-10">
               {/* Introduction Header Area (De-contained) */}
               <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">Fund Mandate</h2>
+                <h2 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">Extracted Parameters</h2>
                 <p className="text-gray-500 leading-relaxed font-medium">
-                  Define your fund parameters to guide the target screening process,
-                  Expand sections below to customize each agent's configuration.
+                  List of Agent Parameters extracted from Parsed PDF Document for Sourcing, Screening and Risk Analysis.
                 </p>
               </div>
+
+              {apiError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-red-700 text-sm">{apiError}</p>
+                </div>
+              )}
+
+              {parsedResult && (
+                <div className="p-4 bg-white border border-gray-100 rounded-lg">
+                  <h3 className="text-lg font-semibold mb-2">Parsed Criteria</h3>
+                  <pre className="whitespace-pre-wrap text-sm text-gray-700 max-h-72 overflow-auto">{JSON.stringify(parsedResult, null, 2)}</pre>
+                </div>
+              )}
 
               {/* Collapsible Sections (Fully naked/De-contained rows) */}
               <div className="space-y-2">
