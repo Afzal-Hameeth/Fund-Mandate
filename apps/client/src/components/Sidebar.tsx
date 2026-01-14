@@ -11,6 +11,7 @@ const Sidebar: React.FC = () => {
   const navItems = [
     { label: 'Agents', path: '/', icon: FiLayers },
     { label: 'Fund Mandate', path: '/fund-mandate', icon: FiFileText },
+    { label: 'Screening Agent', path: '/screening-agent', icon: FiEye },
   ];
 
   return (
