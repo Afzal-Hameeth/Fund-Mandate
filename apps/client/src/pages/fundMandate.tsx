@@ -169,7 +169,7 @@ const FundMandate: React.FC = () => {
 
               <div className="bg-white/70 rounded-lg p-3 border border-indigo-100 mb-3">
                 <div className="flex items-center mb-2">
-                  <div className="w-2 h-2 bg-indigo-500 rounded-full mr-2"></div>
+                  
                   <p className="text-sm font-semibold text-gray-800">Requirements</p>
                 </div>
                 <div className="space-y-1 text-sm text-gray-600">
