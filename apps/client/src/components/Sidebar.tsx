@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {useLocation, NavLink } from 'react-router-dom';
-import {FiLayers, FiChevronLeft, FiChevronRight, FiFileText } from 'react-icons/fi';
+import {FiLayers, FiChevronLeft, FiChevronRight, FiFileText, FiEye } from 'react-icons/fi';
 
 const Sidebar: React.FC = () => {
  
@@ -11,6 +11,7 @@ const Sidebar: React.FC = () => {
   const navItems = [
     { label: 'Agents', path: '/', icon: FiLayers },
     { label: 'Fund Mandate', path: '/fund-mandate', icon: FiFileText },
+    { label: 'Screening Agent', path: '/screening-agent', icon: FiEye },
   ];
 
   return (
