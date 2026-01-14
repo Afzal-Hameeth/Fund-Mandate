@@ -353,10 +353,9 @@ const FundMandate: React.FC = () => {
             <div className="max-w-4xl mx-auto space-y-10">
               {/* Introduction Header Area (De-contained) */}
               <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">Fund Mandate</h2>
+                <h2 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">Extracted Parameters</h2>
                 <p className="text-gray-500 leading-relaxed font-medium">
-                  Define your fund parameters to guide the target screening process,
-                  Expand sections below to customize each agent's configuration.
+                  List of Agent Parameters extracted from Parsed PDF Document for Sourcing, Screening and Risk Analysis.
                 </p>
               </div>
 
