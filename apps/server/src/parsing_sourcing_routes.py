@@ -13,6 +13,25 @@ router = APIRouter(prefix="/api", tags=["fund-sourcing"])
 parse_agent = create_parse_agent()
 filter_agent = create_filter_agent()
 
+from langchain_classic.callbacks.base import BaseCallbackHandler
+from langchain_classic.schema import AgentAction, AgentFinish
+
+class UITracer(BaseCallbackHandler):
+    def __init__(self):
+        self.trace = []
+    
+    def on_agent_action(self, action: AgentAction, **kwargs) -> None:
+        self.trace.append(f"🧠 Thought: {action.log}\n🚀 Action: {action.tool}")
+    
+    def on_tool_start(self, serialized: dict, tool, **kwargs) -> None:
+        self.trace.append(f"🔧 Tool starting: {serialized.get('name', tool)}")
+    
+    def on_tool_end(self, output, **kwargs) -> None:
+        self.trace.append(f"📄 Tool result: {output}")
+    
+    def on_agent_finish(self, finish: AgentFinish, **kwargs) -> None:
+        self.trace.append(f"✅ Final Answer: {finish.log}")
+
 
 @router.post("/parse-mandate")
 async def parse_mandate(
@@ -33,15 +52,24 @@ async def parse_mandate(
     input_prompt = f"Scan input_fund_mandate/ and extract criteria. Query: {query}"
 
     try:
-        result = parse_agent.invoke({"input": input_prompt})
+        tracer = UITracer()
+        config = {"callbacks": [tracer],"configurable": {"recursion_limit": 5}}
+        result = parse_agent.invoke({"input": input_prompt},config=config)
         # Try to parse as JSON, fallback to raw output
         try:
             criteria = json.loads(result["output"])
         except:
             criteria = {"raw_output": result["output"]}
-        return {"status": "success", "criteria": criteria}
+        return {"status": "success","agent_thinking": tracer.trace,  # Fixed traces!
+        "thinking_steps": len(tracer.trace),
+             "criteria": criteria}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Parsing failed: {str(e)}")
+        # raise HTTPException(status_code=500, detail=f"Parsing failed: {str(e)}")
+        return {
+        "status": "error", 
+        "agent_thinking": tracer.trace if 'tracer' in locals() else [],
+        "error": str(e)
+    }
 
 
 @router.post("/filter-companies")
@@ -58,8 +86,9 @@ async def filter_companies(request: dict):
 
         print(f"🔍 Raw input: {raw_input}")
         print(f"🔍 Clean filters: {user_filters}")
-
-        result = filter_agent.invoke({"input": json.dumps(user_filters)})
+        tracer = UITracer()
+        config = {"callbacks": [tracer],"configurable": {"recursion_limit": 5}}
+        result = filter_agent.invoke({"input": json.dumps(user_filters)}, config=config)
 
         # Parse result
         try:
@@ -67,7 +96,8 @@ async def filter_companies(request: dict):
         except:
             companies = {"raw_output": result["output"]}
 
-        return {"status": "success", "companies": companies}
+        return {"status": "success","agent_thinking": tracer.trace,  
+        "thinking_steps": len(tracer.trace), "companies": companies}
     except Exception as e:
         print(f"❌ Error: {str(e)}")
         raise HTTPException(500, f"Filtering failed: {str(e)}")
