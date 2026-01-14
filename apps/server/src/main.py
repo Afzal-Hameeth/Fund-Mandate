@@ -3,11 +3,11 @@ from pathlib import Path
 
 src_path = Path(__file__).parent
 sys.path.insert(0, str(src_path))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fundMandate import router as fundMandate_router
-from parsing_sourcing_routes import router
-from screeningAgent import router as screening_router
+from parsing_sourcing_routes import router as parsing_router
+from fundMandate import router as mandate_router
 
 
 app = FastAPI(
@@ -23,9 +23,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(fundMandate_router)
-app.include_router(router)
-app.include_router(screening_router)
+app.include_router(parsing_router)
+app.include_router(mandate_router)
 
 if __name__ == "__main__":
     import uvicorn
@@ -36,5 +35,6 @@ if __name__ == "__main__":
         port=8000,
         reload=False,
     )
+
 
 
