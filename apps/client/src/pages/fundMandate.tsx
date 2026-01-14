@@ -74,6 +74,7 @@ const FundMandate: React.FC = () => {
     setErrors((prev) => ({ ...prev, description: undefined }));
     setIsSubmitted(false);
   };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -99,69 +100,77 @@ const FundMandate: React.FC = () => {
     setApiError(null);
 
     try {
+      // Prepare multipart form data for the backend API
       const formData = new FormData();
-      formData.append('pdf', selectedFile!);
+      formData.append('pdf', selectedFile as File);
       formData.append('query', description.trim());
 
-      const resp = await fetch(`${API.BASE_URL()}${API.ENDPOINTS.FUND_MANDATE.PARSE()}`, {
+      const response = await fetch(`${API.BASE_URL()}/api/parse-mandate`, {
         method: 'POST',
         body: formData,
       });
 
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(text || `API error: ${resp.status}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `API error: ${response.status}`);
       }
 
-      const data = await resp.json();
+      const data = await response.json();
+      
+      // Debug: Log the actual response structure
+      console.log('API Response:', data);
+      console.log('Criteria structure:', data.criteria);
 
       // Store parsed result and show UI
       setParsedResult(data);
       setSelectedFile(null);
       setDescription('');
       setErrors({});
+      
+      // Show success toast
       toast.success('Fund mandate processed successfully! Parameters extracted.');
+      
       setIsSubmitted(true);
     } catch (error) {
       console.error('Error submitting fund mandate:', error);
       const message = (error as any)?.message || 'Failed to submit fund mandate. Please try again.';
       setApiError(message);
-      toast.error(message);
+      alert(message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const getMandatoryThresholds = () => {
-    if (!parsedResult?.criteria?.fund_mandate?.mandatory_thresholds) {
+    if (!parsedResult?.criteria?.mandate?.sourcing_parameters) {
       return [];
     }
 
-    const thresholds = parsedResult.criteria.fund_mandate.mandatory_thresholds;
+    const thresholds = parsedResult.criteria.mandate.sourcing_parameters;
     return Object.entries(thresholds).map(([key, value]) => ({
-      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-      value: value as string,
+      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
+      value: value as string
     }));
   };
 
   const getPreferredMetrics = () => {
-    if (!parsedResult?.criteria?.fund_mandate?.preferred_metrics) {
+    if (!parsedResult?.criteria?.mandate?.screening_parameters) {
       return [];
     }
 
-    const metrics = parsedResult.criteria.fund_mandate.preferred_metrics;
+    const metrics = parsedResult.criteria.mandate.screening_parameters;
     return Object.entries(metrics).map(([key, value]) => ({
-      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-      value: value as string,
+      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
+      value: value as string
     }));
   };
 
   const getRiskFactors = () => {
-    if (!parsedResult?.criteria?.fund_mandate?.risk_factors) {
+    if (!parsedResult?.criteria?.mandate?.risk_parameters) {
       return [];
     }
-    
-    const factors = parsedResult.criteria.fund_mandate.risk_factors;
+
+    const factors = parsedResult.criteria.mandate.risk_parameters;
     return Object.entries(factors).map(([key, value]) => ({
       key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
       value: value as string
@@ -357,9 +366,9 @@ const FundMandate: React.FC = () => {
               )}
 
               {/* {parsedResult && (
-                <div className="p-4 bg-white border border-gray-100 rounded-lg">
-                  <h3 className="text-lg font-semibold mb-2">Parsed Criteria</h3>
-                  <pre className="whitespace-pre-wrap text-sm text-gray-700 max-h-72 overflow-auto">{JSON.stringify(parsedResult, null, 2)}</pre>
+                <div className="p-4 bg-white border border-gray-100 rounded-lg mb-6">
+                  <h3 className="text-lg font-semibold mb-2">Raw API Response (Debug)</h3>
+                  <pre className="whitespace-pre-wrap text-sm text-gray-700 max-h-72 overflow-auto bg-gray-50 p-3 rounded">{JSON.stringify(parsedResult, null, 2)}</pre>
                 </div>
               )} */}
 
