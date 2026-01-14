@@ -6,6 +6,7 @@ src_path = Path(__file__).parent
 sys.path.insert(0, str(src_path))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from parsing_sourcing_routes import router
 
 
 app = FastAPI(

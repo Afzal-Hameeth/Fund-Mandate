@@ -74,7 +74,6 @@ const FundMandate: React.FC = () => {
     setErrors((prev) => ({ ...prev, description: undefined }));
     setIsSubmitted(false);
   };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -100,66 +99,34 @@ const FundMandate: React.FC = () => {
     setApiError(null);
 
     try {
-      // Mock response for testing the display logic
-      const mockData = {
-        "status": "success",
-        "criteria": {
-          "fund_mandate": {
-            "fund_name": "Asia-Pacific Growth Equity Fund",
-            "target_size": "USD 2.0 Billion",
-            "strategy": "Growth Equity investments in late-stage venture capital opportunities with high growth potential and scalable business models",
-            "geography": {
-              "primary": "India",
-              "secondary": "Singapore and other select Asia-Pacific markets"
-            },
-            "sector": "Technology",
-            "industry": "Software & IT Services",
-            "mandatory_thresholds": {
-              "arr_revenue": "> $40M USD",
-              "ebitda_margin": "> 12%",
-              "yoy_growth": "> 35%",
-              "geography_criteria": "HQ in India OR >50% India revenue"
-            },
-            "preferred_metrics": {
-              "gross_profit_margin": "> 60% (preferred for SaaS)",
-              "net_income": "Positive (preferred, not mandatory)",
-              "return_on_equity": "> 15% (quality threshold)",
-              "debt_to_equity": "< 0.5",
-              "pe_ratio": "< 40 (growth-adjusted)",
-              "price_to_book": "< 15",
-              "market_cap": "> $500M USD (institutional scale)",
-              "dividend_yield": "Not required (growth-focused fund)"
-            },
-            "risk_factors": {
-              "competitive_position": "Focus on companies with strong or leading positions in their segment",
-              "governance_quality": "Require robust governance and transparency; avoid weak governance structures",
-              "customer_concentration": "Prefer companies with diversified customer base; avoid high dependency on single clients",
-              "vendor_dependency": "Monitor heavy reliance on third-party cloud or single vendor platforms",
-              "regulatory_risk": "Consider exposure to data privacy, antitrust, and compliance regulations",
-              "business_model_complexity": "Assess complexity of SaaS, multi-platform, or hybrid models; avoid overly complex structures"
-            }
-          }
-        }
-      };
+      const formData = new FormData();
+      formData.append('pdf', selectedFile!);
+      formData.append('query', description.trim());
 
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const resp = await fetch(`${API.BASE_URL()}${API.ENDPOINTS.FUND_MANDATE.PARSE()}`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `API error: ${resp.status}`);
+      }
+
+      const data = await resp.json();
 
       // Store parsed result and show UI
-      setParsedResult(mockData);
+      setParsedResult(data);
       setSelectedFile(null);
       setDescription('');
       setErrors({});
-      
-      // Show success toast
       toast.success('Fund mandate processed successfully! Parameters extracted.');
-      
       setIsSubmitted(true);
     } catch (error) {
       console.error('Error submitting fund mandate:', error);
       const message = (error as any)?.message || 'Failed to submit fund mandate. Please try again.';
       setApiError(message);
-      alert(message);
+      toast.error(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -169,11 +136,11 @@ const FundMandate: React.FC = () => {
     if (!parsedResult?.criteria?.fund_mandate?.mandatory_thresholds) {
       return [];
     }
-    
+
     const thresholds = parsedResult.criteria.fund_mandate.mandatory_thresholds;
     return Object.entries(thresholds).map(([key, value]) => ({
-      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
-      value: value as string
+      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      value: value as string,
     }));
   };
 
@@ -181,11 +148,11 @@ const FundMandate: React.FC = () => {
     if (!parsedResult?.criteria?.fund_mandate?.preferred_metrics) {
       return [];
     }
-    
+
     const metrics = parsedResult.criteria.fund_mandate.preferred_metrics;
     return Object.entries(metrics).map(([key, value]) => ({
-      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
-      value: value as string
+      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      value: value as string,
     }));
   };
 
