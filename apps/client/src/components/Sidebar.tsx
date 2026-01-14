@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation, NavLink } from 'react-router-dom';
-import { FiHome, FiLayers, FiEye, FiChevronLeft, FiChevronRight, FiFileText } from 'react-icons/fi';
+import {useLocation, NavLink } from 'react-router-dom';
+import {FiLayers, FiChevronLeft, FiChevronRight, FiFileText, FiEye, FiSearch } from 'react-icons/fi';
 
 const Sidebar: React.FC = () => {
-  const navigate = useNavigate();
+ 
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+
 
   const navItems = [
     { label: 'Agents', path: '/', icon: FiLayers },
     { label: 'Fund Mandate', path: '/fund-mandate', icon: FiFileText },
+    { label: 'Sourcing Agent', path: '/sourcing-agent', icon: FiSearch },
+    { label: 'Screening Agent', path: '/screening-agent', icon: FiEye },
   ];
 
   return (
