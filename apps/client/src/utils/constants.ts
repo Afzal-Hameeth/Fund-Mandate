@@ -7,5 +7,8 @@ export const API = {
             FUND_MANDATE: {
                 PARSE: () => '/api/parse-mandate',
             },
+            FILTER: {
+                COMPANIES: () => '/api/filter-companies',
+            },
     },
 };

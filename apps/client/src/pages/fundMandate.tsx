@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { API } from '../utils/constants';
 import { FiUpload, FiFileText, FiSend, FiFile, FiTrash, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import toast from 'react-hot-toast';
@@ -18,6 +19,7 @@ const FundMandate: React.FC = () => {
   });
 
   const extractedParamsRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   // Auto-scroll to extracted parameters when submission is successful
   useEffect(() => {
@@ -353,8 +355,8 @@ const FundMandate: React.FC = () => {
             <div className="max-w-4xl mx-auto space-y-10">
               {/* Introduction Header Area (De-contained) */}
               <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">Extracted Parameters</h2>
-                <p className="text-gray-500 leading-relaxed font-medium">
+                  <h2 className="text-lg font-bold text-gray-900 mb-2 tracking-tight">Extracted Parameters</h2>
+                <p className="text-sm text-gray-500 leading-relaxed font-medium">
                   List of Agent Parameters extracted from Parsed PDF Document for Sourcing, Screening and Risk Analysis.
                 </p>
               </div>
@@ -450,6 +452,15 @@ const FundMandate: React.FC = () => {
                       </div>
                     </div>
                   )}
+                </div>
+                <div className="flex justify-end pt-4">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/sourcing-agent', { state: { sourcing: getMandatoryThresholds(), parsedResult } })}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700"
+                  >
+                    Continue
+                  </button>
                 </div>
               </div>
             </div>
