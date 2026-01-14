@@ -21,6 +21,58 @@ const toDisplayArray = (obj: any) => {
   return [{ key: String(obj), value: '' }];
 };
 
+const formatValue = (key: string, value: any): string => {
+  if (value === null || value === undefined) return '-';
+
+  const currencyKeys = ['Revenue', 'Net Income', 'Total Assets', 'Total Equity', 'EBITDA', 'Market Cap'];
+  const percentageKeys = ['Dividend Yield', 'Return on Equity', 'Gross Profit Margin', '1-Year Change'];
+
+  if (currencyKeys.includes(key) && typeof value === 'string') {
+    // Handle strings like "11.14B", "244.12B."
+    const cleaned = value.replace(/[$,.]/g, '');
+    if (cleaned.includes('B')) {
+      return value; // Already formatted
+    }
+    if (cleaned.includes('M')) {
+      return value;
+    }
+    // If it's a number string, format it
+    const num = parseFloat(cleaned);
+    if (!isNaN(num)) {
+      if (Math.abs(num) >= 1000000000) {
+        return `$${(num / 1000000000).toFixed(2)}B`;
+      } else if (Math.abs(num) >= 1000000) {
+        return `$${(num / 1000000).toFixed(2)}M`;
+      } else if (Math.abs(num) >= 1000) {
+        return `$${(num / 1000).toFixed(2)}K`;
+      }
+      return `$${num.toFixed(2)}`;
+    }
+  }
+
+  if (percentageKeys.includes(key) && typeof value === 'string') {
+    const cleaned = value.replace(/[%]/g, '');
+    const num = parseFloat(cleaned);
+    if (!isNaN(num)) {
+      return `${num.toFixed(2)}%`;
+    }
+  }
+
+  if (key === 'Debt / Equity' && typeof value === 'number') {
+    return value.toFixed(4);
+  }
+
+  if (key === 'P/E Ratio' && typeof value === 'number') {
+    return value.toFixed(2);
+  }
+
+  if (key === 'Price/Book' && typeof value === 'number') {
+    return value.toFixed(2);
+  }
+
+  return String(value).trim();
+};
+
 const SourcingAgent: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -35,6 +87,7 @@ const SourcingAgent: React.FC = () => {
   const sourcingList = sourcingFromState ?? toDisplayArray(derivedFromParsed);
   const [selectedKeys, setSelectedKeys] = useState<Record<string, boolean>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [filterResponse, setFilterResponse] = useState<any>(null);
 
   const toggleSelect = (key: string) => {
     setSelectedKeys((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -50,11 +103,25 @@ const SourcingAgent: React.FC = () => {
     }
 
     setIsSubmitting(true);
+    setFilterResponse(null);
+
     try {
+      // Construct payload in the required format: {"additionalProp1": {selected_parameters}}
+      const selectedParams: Record<string, string> = {};
+      items.forEach((item: any) => {
+        selectedParams[item.key.toLowerCase().replace(/\s+/g, '_')] = item.value;
+      });
+
+      const payload = {
+        additionalProp1: selectedParams
+      };
+
+      console.log('Sending payload:', payload);
+
       const resp = await fetch(`${API.BASE_URL()}${API.ENDPOINTS.FILTER.COMPANIES()}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ selected_thresholds: items }),
+        body: JSON.stringify(payload),
       });
 
       if (!resp.ok) {
@@ -64,10 +131,14 @@ const SourcingAgent: React.FC = () => {
 
       const data = await resp.json();
       console.log('Filter companies response:', data);
-      toast.success('Sent selected thresholds to backend');
+      
+      // Store the response to display it
+      setFilterResponse(data);
+      
+      toast.success('Successfully filtered companies based on selected parameters');
     } catch (err) {
       console.error('Error sending selected thresholds:', err);
-      toast.error('Failed to send to backend');
+      toast.error('Failed to filter companies');
     } finally {
       setIsSubmitting(false);
     }
@@ -128,8 +199,64 @@ const SourcingAgent: React.FC = () => {
         </div>
       ) : (
         <p className="text-sm text-gray-600">No sourcing thresholds found. Navigate from Fund Mandate after upload.</p>
-      )} 
+      )}
 
+      {/* Display Filter Response */}
+      {filterResponse && (
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">Filtered Companies Result</h2>
+          {(() => {
+            const qualified = filterResponse.companies?.qualified || [];
+            const columns = qualified.length > 0 ? Object.keys(qualified[0]) : [];
+            return qualified.length > 0 ? (
+              <div className="bg-white overflow-hidden rounded-lg shadow-[0_0_15px_rgba(0,0,0,0.15)]">
+                <div className="overflow-x-auto overflow-y-auto max-h-[500px]">
+                  <table className="w-full">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="bg-[#BEBEBE]">
+                        <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">S.No.</th>
+                        {columns.map((col) => (
+                          <th
+                            key={col}
+                            className={`px-3 py-3 text-xs font-bold text-black whitespace-nowrap ${
+                              col === 'Company ' ? 'text-left' : 'text-center'
+                            }`}
+                          >
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {qualified.map((row: any, index: number) => (
+                        <tr key={index} className="hover:bg-blue-50 transition-colors cursor-pointer">
+                          <td className="px-3 py-3 text-sm text-black">{index + 1}.</td>
+                          {columns.map((col) => (
+                            <td
+                              key={col}
+                              className={`px-3 py-3 text-sm whitespace-nowrap ${
+                                col === 'Company '
+                                  ? 'text-left text-indigo-600 font-bold'
+                                  : 'text-center text-black'
+                              }`}
+                            >
+                              {formatValue(col, row[col])}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                <p className="text-sm text-gray-600">No qualified companies found in the response.</p>
+              </div>
+            );
+          })()}
+        </div>
+      )}
       
     </div>
     </div>
