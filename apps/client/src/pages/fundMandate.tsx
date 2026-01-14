@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API } from '../utils/constants';
 import { FiUpload, FiFileText, FiSend, FiFile, FiTrash, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 
 const FundMandate: React.FC = () => {
@@ -6,6 +7,8 @@ const FundMandate: React.FC = () => {
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [parsedResult, setParsedResult] = useState<any | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [errors, setErrors] = useState<{ file?: string; description?: string }>({});
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -103,25 +106,38 @@ const FundMandate: React.FC = () => {
 
     setIsSubmitting(true);
     setIsSubmitted(false);
+    setParsedResult(null);
+    setApiError(null);
 
     try {
-      // TODO: Implement file upload to backend
-      console.log('Submitting:', {
-        file: selectedFile!.name,
-        description: description.trim(),
+      // Prepare multipart form data expected by backend
+      const formData = new FormData();
+      formData.append('pdf', selectedFile as File);
+      formData.append('query', description.trim());
+
+      const resp = await fetch(`${API.BASE_URL()}${API.ENDPOINTS.FUND_MANDATE.PARSE()}`, {
+        method: 'POST',
+        body: formData,
       });
 
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `API error: ${resp.status}`);
+      }
 
-      alert('Fund mandate submitted successfully!');
+      const data = await resp.json();
+
+      // Store parsed result and show UI
+      setParsedResult(data);
       setSelectedFile(null);
       setDescription('');
       setErrors({});
       setIsSubmitted(true);
     } catch (error) {
       console.error('Error submitting fund mandate:', error);
-      alert('Failed to submit fund mandate. Please try again.');
+      const message = (error as any)?.message || 'Failed to submit fund mandate. Please try again.';
+      setApiError(message);
+      alert(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -169,7 +185,7 @@ const FundMandate: React.FC = () => {
 
               <div className="bg-white/70 rounded-lg p-3 border border-indigo-100 mb-3">
                 <div className="flex items-center mb-2">
-                  <div className="w-2 h-2 bg-indigo-500 rounded-full mr-2"></div>
+                  
                   <p className="text-sm font-semibold text-gray-800">Requirements</p>
                 </div>
                 <div className="space-y-1 text-sm text-gray-600">
@@ -337,12 +353,24 @@ const FundMandate: React.FC = () => {
             <div className="max-w-4xl mx-auto space-y-10">
               {/* Introduction Header Area (De-contained) */}
               <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">Fund Mandate</h2>
+                <h2 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">Extracted Parameters</h2>
                 <p className="text-gray-500 leading-relaxed font-medium">
-                  Define your fund parameters to guide the target screening process,
-                  Expand sections below to customize each agent's configuration.
+                  List of Agent Parameters extracted from Parsed PDF Document for Sourcing, Screening and Risk Analysis.
                 </p>
               </div>
+
+              {apiError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-red-700 text-sm">{apiError}</p>
+                </div>
+              )}
+
+              {parsedResult && (
+                <div className="p-4 bg-white border border-gray-100 rounded-lg">
+                  <h3 className="text-lg font-semibold mb-2">Parsed Criteria</h3>
+                  <pre className="whitespace-pre-wrap text-sm text-gray-700 max-h-72 overflow-auto">{JSON.stringify(parsedResult, null, 2)}</pre>
+                </div>
+              )}
 
               {/* Collapsible Sections (Fully naked/De-contained rows) */}
               <div className="space-y-2">
