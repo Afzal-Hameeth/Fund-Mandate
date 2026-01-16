@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from parsing_sourcing_routes import router as parsing_router
 from fundMandate import router as mandate_router
+from risk_api import router as risk_router
 
 
 app = FastAPI(
@@ -25,6 +26,7 @@ app.add_middleware(
 
 app.include_router(parsing_router)
 app.include_router(mandate_router)
+app.include_router(risk_router)
 
 if __name__ == "__main__":
     import uvicorn
