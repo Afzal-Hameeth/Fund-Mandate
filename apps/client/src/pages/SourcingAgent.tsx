@@ -75,6 +75,7 @@ const SourcingAgent: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [filterResponse, setFilterResponse] = useState<any>(null);
   const [screeningResponse, setScreeningResponse] = useState<any>(null);
+  const [riskAnalysisResponse, setRiskAnalysisResponse] = useState<any>(null);
   const [expandedScreeningResults, setExpandedScreeningResults] = useState<Record<number, boolean>>({});
   const screeningResultsRef = useRef<HTMLDivElement>(null);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -237,6 +238,62 @@ const SourcingAgent: React.FC = () => {
     } catch (err) {
       console.error('Error screening companies:', err);
       toast.error('Failed to screen companies');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAnalyzeRisk = async () => {
+    const selectedRiskItems = getSelectedRiskAnalysisItems();
+
+    if (!selectedRiskItems || selectedRiskItems.length === 0) {
+      toast.error('Please select at least one risk analysis parameter');
+      return;
+    }
+
+    if (!screeningResponse?.company_details || screeningResponse.company_details.length === 0) {
+      toast.error('No companies available for risk analysis');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setRiskAnalysisResponse(null);
+
+    try {
+      // Build risk_parameters from selected risk analysis items
+      const riskParameters: Record<string, string> = {};
+      selectedRiskItems.forEach((item: any) => {
+        riskParameters[item.key] = item.value;
+      });
+
+      // Get companies from screening response
+      const companies = screeningResponse.company_details;
+
+      const payload = {
+        companies: companies,
+        risk_parameters: riskParameters
+      };
+
+      console.log('Risk analysis payload:', payload);
+
+      const resp = await fetch(`${API.BASE_URL()}${API.ENDPOINTS.RISK.ANALYZE_CUSTOM()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(txt || `Server error ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      console.log('Risk analysis response:', data);
+      setRiskAnalysisResponse(data);
+      toast.success('Risk analysis completed successfully');
+    } catch (err) {
+      console.error('Error analyzing risk:', err);
+      toast.error('Failed to analyze risk');
     } finally {
       setIsSubmitting(false);
     }
@@ -515,7 +572,7 @@ const SourcingAgent: React.FC = () => {
           <div className="space-y-6">
             {screeningResponse?.company_details && screeningResponse.company_details.length > 0 ? (
               <>
-              <div className="pb-4">
+                <div className="pb-4">
                   <p className="text-sm text-black-800">
                     <strong>Step 3:</strong> Select required risk analysis parameters to identify potential risk of screened companies.
                   </p>
@@ -557,6 +614,54 @@ const SourcingAgent: React.FC = () => {
                         })}
                       </div>
                     )}
+
+                    {riskAnalysisResponse?.investable_companies ? (
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-4">Risk Analysis Results</h3>
+                        <div className="bg-white overflow-hidden rounded-lg shadow-[0_0_15px_rgba(0,0,0,0.15)]">
+                          <div className="p-4 bg-green-50 border-b border-green-200">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-green-900">Analysis Summary</p>
+                                <p className="text-xs text-green-700 mt-1">
+                                  {riskAnalysisResponse.summary?.passed ?? 0} out of {riskAnalysisResponse.summary?.total ?? 0} companies passed risk analysis ({riskAnalysisResponse.summary?.pass_rate ?? 0}%)
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="overflow-x-auto overflow-y-auto max-h-[500px]">
+                            <table className="w-full">
+                              <thead className="sticky top-0 z-10">
+                                <tr className="bg-[#BEBEBE]">
+                                  <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">S.No.</th>
+                                  <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">Company</th>
+                                  <th className="px-3 py-3 text-center text-xs font-bold text-black whitespace-nowrap">Risk Score</th>
+                                  <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">Recommendation</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {riskAnalysisResponse.investable_companies.map((company: any, index: number) => (
+                                  <tr key={index} className="hover:bg-indigo-50 transition-colors border-b">
+                                    <td className="px-3 py-3 text-sm text-black">{index + 1}.</td>
+                                    <td className="px-3 py-3 text-sm text-indigo-600 font-bold">{company.company_name}</td>
+                                    <td className="px-3 py-3 text-sm text-center text-black">
+                                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                        company.overall_risk_score <= 2 ? 'bg-green-100 text-green-800' :
+                                        company.overall_risk_score <= 5 ? 'bg-yellow-100 text-yellow-800' :
+                                        'bg-red-100 text-red-800'
+                                      }`}>
+                                        {company.overall_risk_score.toFixed(1)}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-3 text-sm text-black">{company.recommendation}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                   </>
                 ) : (
                   <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
@@ -692,6 +797,26 @@ const SourcingAgent: React.FC = () => {
                     </>
                   ) : (
                     <span>Screen Companies</span>
+                  )}
+                </button>
+              )}
+
+              {currentStep === 2 && riskAnalysisList && riskAnalysisList.length > 0 && (
+                <button
+                  onClick={handleAnalyzeRisk}
+                  disabled={isSubmitting || riskAnalysisResponse ? true : getSelectedRiskAnalysisItems().length === 0}
+                  className={`flex items-center space-x-2 px-6 py-3 rounded-lg font-medium transition-colors ${
+                    isSubmitting || riskAnalysisResponse || getSelectedRiskAnalysisItems().length === 0
+                      ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                      : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                  }`}
+                >
+                  {isSubmitting ? (
+                    <span>Analyzing...</span>
+                  ) : riskAnalysisResponse ? (
+                    <span>✓ Analysis Complete</span>
+                  ) : (
+                    <span>Analyze Risk</span>
                   )}
                 </button>
               )}
