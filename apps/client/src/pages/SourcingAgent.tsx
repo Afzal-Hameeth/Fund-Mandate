@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { API } from '../utils/constants';
 import toast from 'react-hot-toast';
@@ -59,6 +59,8 @@ const SourcingAgent: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [filterResponse, setFilterResponse] = useState<any>(null);
   const [screeningResponse, setScreeningResponse] = useState<any>(null);
+  const [expandedScreeningResults, setExpandedScreeningResults] = useState<Record<number, boolean>>({});
+  const screeningResultsRef = useRef<HTMLDivElement>(null);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     sourcing: true,
     screening: true,
@@ -83,6 +85,10 @@ const SourcingAgent: React.FC = () => {
 
   const toggleSection = (section: string) => {
     setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const toggleScreeningResult = (index: number) => {
+    setExpandedScreeningResults((prev) => ({ ...prev, [index]: !prev[index] }));
   };
 
   const getSelectedSourcingItems = () => sourcingList.filter((s: any) => selectedSourcingKeys[s.key]);
@@ -209,6 +215,9 @@ const SourcingAgent: React.FC = () => {
       console.log('Screening response:', data);
       setScreeningResponse(data);
       toast.success('Companies screened successfully');
+      setTimeout(() => {
+        screeningResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
     } catch (err) {
       console.error('Error screening companies:', err);
       toast.error('Failed to screen companies');
@@ -367,7 +376,7 @@ const SourcingAgent: React.FC = () => {
                   </>
                 )}
 
-                <div>
+                <div className="mb-8">
                   <h3 className="text-sm font-semibold text-gray-700 mb-4">Select Companies to Screen</h3>
                   <div className="bg-white overflow-hidden rounded-lg shadow-[0_0_15px_rgba(0,0,0,0.15)]">
                     <div className="overflow-x-auto overflow-y-auto max-h-[400px]">
@@ -437,50 +446,38 @@ const SourcingAgent: React.FC = () => {
                 </div>
 
                 {screeningResponse?.company_details ? (
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-700 mb-4">Screening Results</h3>
-                    <div className="bg-white overflow-hidden rounded-lg shadow-[0_0_15px_rgba(0,0,0,0.15)]">
-                      <div className="overflow-x-auto overflow-y-auto max-h-[400px]">
-                        <table className="w-full">
-                          <thead className="sticky top-0 z-10">
-                            <tr className="bg-[#BEBEBE]">
-                              <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">S.No.</th>
-                              {screeningResponse.company_details[0] &&
-                                Object.keys(screeningResponse.company_details[0]).map((col) => (
-                                  <th
-                                    key={col}
-                                    className={`px-3 py-3 text-xs font-bold text-black whitespace-nowrap ${col === 'Company ' || col === 'Company' ? 'text-left' : 'text-center'}`}
-                                  >
-                                    {col}
-                                  </th>
-                                ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {screeningResponse.company_details.map((row: any, index: number) => (
-                              <tr key={index} className="hover:bg-indigo-50 transition-colors">
-                                <td className="px-3 py-3 text-sm text-black">{index + 1}.</td>
-                                {Object.entries(row).map(([col, value]: [string, any]) => (
-                                  <td
-                                    key={col}
-                                    className={`px-3 py-3 text-sm whitespace-nowrap ${
-                                      col === 'Company ' || col === 'Company'
-                                        ? 'text-left text-indigo-600 font-bold'
-                                        : 'text-center text-black'
-                                    }`}
-                                  >
-                                    {formatValue(value)}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-600 mt-3">
+                  <div className="mt-12" ref={screeningResultsRef}>
+                    <h3 className="text-base font-bold text-black">List of companies passed the criteria</h3>
+                    <p className="text-sm text-black mb-4">
                       {screeningResponse.company_details.length} companies passed screening criteria
                     </p>
+                    <div className="space-y-1 max-h-[400px] overflow-y-auto">
+                      {screeningResponse.company_details.map((row: any, index: number) => {
+                        const companyName = row['Company '] || row['Company'] || row['company'] || 'Unknown Company';
+                        const reason = row['Reason'] || row['reason'] || row['Screening Reason'] || row['screening_reason'] || '';
+                        const isExpanded = !!expandedScreeningResults[index];
+                        return (
+                          <div key={index}>
+                            <button
+                              onClick={() => toggleScreeningResult(index)}
+                              className="w-full flex items-center gap-2 py-2 px-1 text-left hover:bg-gray-50 transition-colors"
+                            >
+                              {isExpanded ? (
+                                <FiChevronUp className="w-4 h-4 text-gray-600" />
+                              ) : (
+                                <FiChevronDown className="w-4 h-4 text-gray-600" />
+                              )}
+                              <span className="text-black font-bold text-sm">{companyName}</span>
+                            </button>
+                            {isExpanded && reason && (
+                              <div className="pl-8 pb-2 text-sm">
+                                <span className="text-gray-900 font-semibold">Reason:</span> <span className="text-black">{formatValue(reason)}</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : null}
               </>
