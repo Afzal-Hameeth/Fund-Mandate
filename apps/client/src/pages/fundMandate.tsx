@@ -144,11 +144,18 @@ const FundMandate: React.FC = () => {
   };
 
   const getMandatoryThresholds = () => {
-    if (!parsedResult?.criteria?.mandate?.sourcing_parameters) {
+    // Check multiple possible paths for sourcing_parameters
+    const thresholds = 
+      parsedResult?.criteria?.mandate?.sourcing_parameters ??
+      parsedResult?.criteria?.fund_mandate?.sourcing_parameters ??
+      parsedResult?.criteria?.sourcing_parameters ??
+      parsedResult?.sourcing_parameters ??
+      null;
+    
+    if (!thresholds) {
       return [];
     }
 
-    const thresholds = parsedResult.criteria.mandate.sourcing_parameters;
     return Object.entries(thresholds).map(([key, value]) => ({
       key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
       value: value as string
@@ -156,11 +163,18 @@ const FundMandate: React.FC = () => {
   };
 
   const getPreferredMetrics = () => {
-    if (!parsedResult?.criteria?.mandate?.screening_parameters) {
+    // Check multiple possible paths for screening_parameters
+    const metrics = 
+      parsedResult?.criteria?.mandate?.screening_parameters ??
+      parsedResult?.criteria?.fund_mandate?.screening_parameters ??
+      parsedResult?.criteria?.screening_parameters ??
+      parsedResult?.screening_parameters ??
+      null;
+    
+    if (!metrics) {
       return [];
     }
 
-    const metrics = parsedResult.criteria.mandate.screening_parameters;
     return Object.entries(metrics).map(([key, value]) => ({
       key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
       value: value as string
@@ -168,11 +182,20 @@ const FundMandate: React.FC = () => {
   };
 
   const getRiskFactors = () => {
-    if (!parsedResult?.criteria?.mandate?.risk_parameters) {
+    // Check multiple possible paths for risk_parameters and risk_analysis_parameters
+    const factors = 
+      parsedResult?.criteria?.mandate?.risk_parameters ??
+      parsedResult?.criteria?.fund_mandate?.risk_parameters ??
+      parsedResult?.criteria?.risk_parameters ??
+      parsedResult?.criteria?.risk_parameters ??
+      parsedResult?.risk_parameters ??
+      parsedResult?.risk_parameters ??
+      null;
+    
+    if (!factors) {
       return [];
     }
 
-    const factors = parsedResult.criteria.mandate.risk_parameters;
     return Object.entries(factors).map(([key, value]) => ({
       key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
       value: value as string
