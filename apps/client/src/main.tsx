@@ -5,7 +5,6 @@ import './index.css'
 import DashLayout from './layouts/DashLayout';
 import Agent from './pages/agent';
 import FundMandate from './pages/fundMandate';
-import ScreeningAgent from './pages/screeningAgent';
 import SourcingAgent from './pages/SourcingAgent';
 import Error from './pages/Error';
 
@@ -24,11 +23,6 @@ const router = createBrowserRouter([
       {
         path: 'fund-mandate',
         element: <FundMandate />,
-        errorElement: <Error />,
-      },
-      {
-        path: 'screening-agent',
-        element: <ScreeningAgent />,
         errorElement: <Error />,
       },
       {

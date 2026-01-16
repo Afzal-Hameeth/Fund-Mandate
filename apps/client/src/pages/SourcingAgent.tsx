@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { API } from '../utils/constants';
 import { Box,Table,TableHead,TableRow,TableCell,Typography,TableBody,IconButton,Chip,Tooltip,Pagination,TableContainer,Dialog,DialogTitle,DialogContent,DialogActions,Button,Menu,MenuItem,ListItemIcon,ListItemText,Alert,AlertTitle,} from "@mui/material"
@@ -37,31 +37,31 @@ const SourcingAgent: React.FC = () => {
 
   // Sourcing parameters with multiple fallback paths
   const sourcingFromState = state.sourcing ?? null;
-  const derivedSourcingFromParsed = 
-    parsed?.criteria?.mandate?.sourcing_parameters ?? 
-    parsed?.criteria?.fund_mandate?.sourcing_parameters ?? 
-    parsed?.criteria?.sourcing_parameters ?? 
-    parsed?.sourcing_parameters ?? 
+  const derivedSourcingFromParsed =
+    parsed?.criteria?.mandate?.sourcing_parameters ??
+    parsed?.criteria?.fund_mandate?.sourcing_parameters ??
+    parsed?.criteria?.sourcing_parameters ??
+    parsed?.sourcing_parameters ??
     null;
   const sourcingList = sourcingFromState ?? toDisplayArray(derivedSourcingFromParsed);
 
   // Screening parameters with multiple fallback paths
   const screeningFromState = state.screening ?? null;
-  const derivedScreeningFromParsed = 
-    parsed?.criteria?.mandate?.screening_parameters ?? 
-    parsed?.criteria?.fund_mandate?.screening_parameters ?? 
-    parsed?.criteria?.screening_parameters ?? 
-    parsed?.screening_parameters ?? 
+  const derivedScreeningFromParsed =
+    parsed?.criteria?.mandate?.screening_parameters ??
+    parsed?.criteria?.fund_mandate?.screening_parameters ??
+    parsed?.criteria?.screening_parameters ??
+    parsed?.screening_parameters ??
     null;
   const screeningList = screeningFromState ?? toDisplayArray(derivedScreeningFromParsed);
 
   // Risk analysis parameters with multiple fallback paths
   const riskAnalysisFromState = state.riskAnalysis ?? null;
-  const derivedRiskAnalysisFromParsed = 
-    parsed?.criteria?.mandate?.risk_parameters ?? 
-    parsed?.criteria?.fund_mandate?.risk_parameters ?? 
-    parsed?.criteria?.risk_parameters ?? 
-    parsed?.risk_parameters ?? 
+  const derivedRiskAnalysisFromParsed =
+    parsed?.criteria?.mandate?.risk_parameters ??
+    parsed?.criteria?.fund_mandate?.risk_parameters ??
+    parsed?.criteria?.risk_parameters ??
+    parsed?.risk_parameters ??
     null;
   const riskAnalysisList = riskAnalysisFromState ?? toDisplayArray(derivedRiskAnalysisFromParsed);
 
@@ -77,7 +77,9 @@ const SourcingAgent: React.FC = () => {
   const [screeningResponse, setScreeningResponse] = useState<any>(null);
   const [riskAnalysisResponse, setRiskAnalysisResponse] = useState<any>(null);
   const [expandedScreeningResults, setExpandedScreeningResults] = useState<Record<number, boolean>>({});
+  const [expandedRiskResults, setExpandedRiskResults] = useState<Record<number, boolean>>({});
   const screeningResultsRef = useRef<HTMLDivElement>(null);
+  const riskAnalysisResultsRef = useRef<HTMLDivElement>(null);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     sourcing: true,
     screening: true,
@@ -107,6 +109,16 @@ const SourcingAgent: React.FC = () => {
   const toggleScreeningResult = (index: number) => {
     setExpandedScreeningResults((prev) => ({ ...prev, [index]: !prev[index] }));
   };
+
+  const toggleRiskResult = (index: number) => {
+    setExpandedRiskResults((prev) => ({ ...prev, [index]: !prev[index] }));
+  };
+
+  useEffect(() => {
+    if (riskAnalysisResponse?.investable_companies && riskAnalysisResultsRef.current) {
+      riskAnalysisResultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [riskAnalysisResponse]);
 
   const getSelectedSourcingItems = () => sourcingList.filter((s: any) => selectedSourcingKeys[s.key]);
   const getSelectedScreeningItems = () => screeningList.filter((s: any) => selectedScreeningKeys[s.key]);
@@ -616,49 +628,51 @@ const SourcingAgent: React.FC = () => {
                     )}
 
                     {riskAnalysisResponse?.investable_companies ? (
-                      <div>
-                        <h3 className="text-sm font-semibold text-gray-700 mb-4">Risk Analysis Results</h3>
-                        <div className="bg-white overflow-hidden rounded-lg shadow-[0_0_15px_rgba(0,0,0,0.15)]">
-                          <div className="p-4 bg-green-50 border-b border-green-200">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="text-sm font-semibold text-green-900">Analysis Summary</p>
-                                <p className="text-xs text-green-700 mt-1">
-                                  {riskAnalysisResponse.summary?.passed ?? 0} out of {riskAnalysisResponse.summary?.total ?? 0} companies passed risk analysis ({riskAnalysisResponse.summary?.pass_rate ?? 0}%)
-                                </p>
-                              </div>
+                      <div ref={riskAnalysisResultsRef} className="mt-6">
+                        <div className="mb-4">
+                          <h3 className="text-lg font-bold text-gray-900">List of companies passed the criteria</h3>
+                          <p className="text-sm text-gray-600">
+                            {riskAnalysisResponse.investable_companies.length} companies passed screening criteria
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          {riskAnalysisResponse.investable_companies.map((company: any, index: number) => (
+                            <div key={index}>
+                              <button
+                                onClick={() => toggleRiskResult(index)}
+                                className="flex items-center gap-3 py-2 hover:text-gray-700 transition-colors"
+                              >
+                                {expandedRiskResults[index] ? (
+                                  <FiChevronUp className="w-5 h-5 text-gray-600" />
+                                ) : (
+                                  <FiChevronDown className="w-5 h-5 text-gray-600" />
+                                )}
+                                <span className="text-sm font-semibold text-gray-900">{company.company_name}</span>
+                                <span className={`ml-2 px-2 py-0.5 rounded text-xs font-semibold ${
+                                  company.overall_risk_score <= 2 ? 'bg-green-100 text-green-800' :
+                                  company.overall_risk_score <= 5 ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-red-100 text-red-800'
+                                }`}>
+                                  {company.overall_risk_score?.toFixed(1) ?? '0.0'}
+                                </span>
+                              </button>
+                              {expandedRiskResults[index] && (
+                                <div className="pl-8 py-2 space-y-2">
+                                  {company.risk_scores?.map((risk: any, riskIndex: number) => (
+                                    <div key={riskIndex} className="text-sm">
+                                      <span className="font-medium text-gray-900">{risk.category}: </span>
+                                      <span className="text-gray-600">{risk.reason} </span>
+                                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${
+                                        risk.score === 'GREEN' ? 'bg-green-100 text-green-800' :
+                                        risk.score === 'YELLOW' ? 'bg-yellow-100 text-yellow-800' :
+                                        risk.score === 'RED' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
+                                      }`}>{risk.score}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                          </div>
-                          <div className="overflow-x-auto overflow-y-auto max-h-[500px]">
-                            <table className="w-full">
-                              <thead className="sticky top-0 z-10">
-                                <tr className="bg-[#BEBEBE]">
-                                  <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">S.No.</th>
-                                  <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">Company</th>
-                                  <th className="px-3 py-3 text-center text-xs font-bold text-black whitespace-nowrap">Risk Score</th>
-                                  <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">Recommendation</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {riskAnalysisResponse.investable_companies.map((company: any, index: number) => (
-                                  <tr key={index} className="hover:bg-indigo-50 transition-colors border-b">
-                                    <td className="px-3 py-3 text-sm text-black">{index + 1}.</td>
-                                    <td className="px-3 py-3 text-sm text-indigo-600 font-bold">{company.company_name}</td>
-                                    <td className="px-3 py-3 text-sm text-center text-black">
-                                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                                        company.overall_risk_score <= 2 ? 'bg-green-100 text-green-800' :
-                                        company.overall_risk_score <= 5 ? 'bg-yellow-100 text-yellow-800' :
-                                        'bg-red-100 text-red-800'
-                                      }`}>
-                                        {company.overall_risk_score.toFixed(1)}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-3 text-sm text-black">{company.recommendation}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
+                          ))}
                         </div>
                       </div>
                     ) : null}
