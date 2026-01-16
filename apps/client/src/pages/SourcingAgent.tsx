@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { API } from '../utils/constants';
 import { Box,Table,TableHead,TableRow,TableCell,Typography,TableBody,IconButton,Chip,Tooltip,Pagination,TableContainer,Dialog,DialogTitle,DialogContent,DialogActions,Button,Menu,MenuItem,ListItemIcon,ListItemText,Alert,AlertTitle,} from "@mui/material"
 import toast from 'react-hot-toast';
-import { FiArrowLeft, FiArrowRight, FiCheck, FiChevronDown, FiChevronUp } from 'react-icons/fi';
+import { FiArrowLeft, FiArrowRight, FiCheck, FiChevronDown, FiChevronUp, FiEye } from 'react-icons/fi';
 
 const toDisplayArray = (obj: any) => {
   if (!obj) return [];
@@ -78,6 +78,8 @@ const SourcingAgent: React.FC = () => {
   const [riskAnalysisResponse, setRiskAnalysisResponse] = useState<any>(null);
   const [expandedScreeningResults, setExpandedScreeningResults] = useState<Record<number, boolean>>({});
   const [expandedRiskResults, setExpandedRiskResults] = useState<Record<number, boolean>>({});
+  const [companyDetailOpen, setCompanyDetailOpen] = useState(false);
+  const [selectedCompanyDetail, setSelectedCompanyDetail] = useState<any>(null);
   const screeningResultsRef = useRef<HTMLDivElement>(null);
   const riskAnalysisResultsRef = useRef<HTMLDivElement>(null);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -112,6 +114,16 @@ const SourcingAgent: React.FC = () => {
 
   const toggleRiskResult = (index: number) => {
     setExpandedRiskResults((prev) => ({ ...prev, [index]: !prev[index] }));
+  };
+
+  const openCompanyDetail = (company: any) => {
+    setSelectedCompanyDetail(company);
+    setCompanyDetailOpen(true);
+  };
+
+  const closeCompanyDetail = () => {
+    setCompanyDetailOpen(false);
+    setSelectedCompanyDetail(null);
   };
 
   useEffect(() => {
@@ -369,36 +381,46 @@ const SourcingAgent: React.FC = () => {
                         <table className="w-full">
                           <thead className="sticky top-0 z-10">
                             <tr className="bg-[#BEBEBE]">
-                              <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">S.No.</th>
-                              <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">Company</th>
+                              <th className="px-2 py-3 text-left text-xs font-bold text-black w-12">S.No.</th>
+                              <th className="px-3 py-3 text-left text-xs font-bold text-black min-w-[150px] max-w-[200px]">Company</th>
                               {filterResponse.companies.qualified[0] &&
-                                Object.keys(filterResponse.companies.qualified[0]).map((col) => (
-                                  col !== 'Company ' && (
+                                Object.keys(filterResponse.companies.qualified[0])
+                                  .filter((col) => col !== 'Company ' && col !== 'Company')
+                                  .slice(0, 3)
+                                  .map((col) => (
                                     <th
                                       key={col}
                                       className="px-3 py-3 text-xs font-bold text-black whitespace-nowrap text-center"
                                     >
                                       {col}
                                     </th>
-                                  )
-                                ))}
+                                  ))}
+                              <th className="px-3 py-3 text-center text-xs font-bold text-black whitespace-nowrap">View</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {filterResponse.companies.qualified.map((row: any, index: number) => (
-                              <tr key={index} className="hover:bg-indigo-50 transition-colors">
-                                <td className="px-3 py-3 text-sm text-black">{index + 1}.</td>
-                                <td className="px-3 py-3 text-sm text-indigo-600 font-bold whitespace-nowrap">{row['Company '] || row['Company']}</td>
-                                {Object.entries(row).map(([col, value]: [string, any]) => {
-                                  if (col === 'Company ' || col === 'Company') return null;
-                                  return (
+                            {filterResponse.companies.qualified.map((row: any, index: number) => {
+                              const columns = Object.entries(row).filter(([col]) => col !== 'Company ' && col !== 'Company');
+                              return (
+                                <tr key={index} className="hover:bg-indigo-50 transition-colors">
+                                  <td className="px-2 py-3 text-sm text-black w-12">{index + 1}.</td>
+                                  <td className="px-3 py-3 text-sm text-indigo-600 font-bold min-w-[150px] max-w-[200px] break-words">{row['Company '] || row['Company']}</td>
+                                  {columns.slice(0, 3).map(([col, value]: [string, any]) => (
                                     <td key={col} className="px-3 py-3 text-sm text-black whitespace-nowrap text-center">
                                       {formatValue(value)}
                                     </td>
-                                  );
-                                })}
-                              </tr>
-                            ))}
+                                  ))}
+                                  <td className="px-3 py-3 text-sm text-center">
+                                    <button
+                                      onClick={() => openCompanyDetail(row)}
+                                      className="text-indigo-600 hover:text-indigo-800 transition-colors"
+                                    >
+                                      <FiEye className="w-5 h-5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -473,7 +495,7 @@ const SourcingAgent: React.FC = () => {
                       <table className="w-full">
                         <thead className="sticky top-0 z-10">
                           <tr className="bg-[#BEBEBE]">
-                            <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">
+                            <th className="px-2 py-3 text-left text-xs font-bold text-black w-12">
                               <input
                                 type="checkbox"
                                 onChange={(e) => {
@@ -490,26 +512,29 @@ const SourcingAgent: React.FC = () => {
                                 className="w-4 h-4 text-indigo-600 rounded"
                               />
                             </th>
-                            <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">Company</th>
+                            <th className="px-3 py-3 text-left text-xs font-bold text-black min-w-[150px] max-w-[200px]">Company</th>
                             {filterResponse.companies.qualified[0] &&
-                              Object.keys(filterResponse.companies.qualified[0]).map((col) => (
-                                col !== 'Company ' && (
+                              Object.keys(filterResponse.companies.qualified[0])
+                                .filter((col) => col !== 'Company ' && col !== 'Company')
+                                .slice(0, 4)
+                                .map((col) => (
                                   <th
                                     key={col}
                                     className="px-3 py-3 text-xs font-bold text-black whitespace-nowrap text-center"
                                   >
                                     {col}
                                   </th>
-                                )
-                              ))}
+                                ))}
+                            <th className="px-3 py-3 text-center text-xs font-bold text-black whitespace-nowrap">View</th>
                           </tr>
                         </thead>
                         <tbody>
                           {filterResponse.companies.qualified.map((row: any, index: number) => {
                             const isSelected = !!selectedCompanies[index];
+                            const columns = Object.entries(row).filter(([col]) => col !== 'Company ' && col !== 'Company');
                             return (
                               <tr key={index} className={`${isSelected ? 'bg-indigo-50' : 'hover:bg-gray-50'} transition-colors cursor-pointer`}>
-                                <td className="px-3 py-3 text-sm text-black">
+                                <td className="px-2 py-3 text-sm text-black w-12">
                                   <input
                                     type="checkbox"
                                     checked={isSelected}
@@ -517,15 +542,20 @@ const SourcingAgent: React.FC = () => {
                                     className="w-4 h-4 text-indigo-600 rounded"
                                   />
                                 </td>
-                                <td className="px-3 py-3 text-sm text-indigo-600 font-bold whitespace-nowrap">{row['Company '] || row['Company']}</td>
-                                {Object.entries(row).map(([col, value]: [string, any]) => {
-                                  if (col === 'Company ' || col === 'Company') return null;
-                                  return (
-                                    <td key={col} className="px-3 py-3 text-sm text-black whitespace-nowrap text-center">
-                                      {formatValue(value)}
-                                    </td>
-                                  );
-                                })}
+                                <td className="px-3 py-3 text-sm text-indigo-600 font-bold min-w-[150px] max-w-[200px] break-words">{row['Company '] || row['Company']}</td>
+                                {columns.slice(0, 4).map(([col, value]: [string, any]) => (
+                                  <td key={col} className="px-3 py-3 text-sm text-black whitespace-nowrap text-center">
+                                    {formatValue(value)}
+                                  </td>
+                                ))}
+                                <td className="px-3 py-3 text-sm text-center">
+                                  <button
+                                    onClick={() => openCompanyDetail(row)}
+                                    className="text-indigo-600 hover:text-indigo-800 transition-colors"
+                                  >
+                                    <FiEye className="w-5 h-5" />
+                                  </button>
+                                </td>
                               </tr>
                             );
                           })}
@@ -839,6 +869,39 @@ const SourcingAgent: React.FC = () => {
         </div>
       </div>
       </div>
+
+      <Dialog
+        open={companyDetailOpen}
+        onClose={closeCompanyDetail}
+        maxWidth="sm"
+        PaperProps={{ sx: { maxHeight: '350px', width: '350px' } }}
+      >
+        <DialogTitle className="font-bold text-sm py-2">
+          {selectedCompanyDetail?.['Company '] || selectedCompanyDetail?.['Company'] || 'Company Details'}
+        </DialogTitle>
+        <DialogContent dividers sx={{ padding: '12px' }}>
+          {selectedCompanyDetail && (
+            <div className="space-y-1">
+              {Object.entries(selectedCompanyDetail).map(([key, value]: [string, any]) => (
+                <div key={key} className="flex border-b border-gray-100 pb-1">
+                  <span className="font-medium text-gray-700 w-1/3 text-xs">{key}:</span>
+                  <span className="text-gray-900 w-2/3 text-xs">{formatValue(value)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ padding: '8px 12px' }}>
+          <Button
+            onClick={closeCompanyDetail}
+            variant="contained"
+            size="small"
+            sx={{ backgroundColor: '#4F46E5', '&:hover': { backgroundColor: '#4338CA' }, textTransform: 'none' }}
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 };
