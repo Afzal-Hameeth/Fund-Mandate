@@ -12,7 +12,6 @@ const Sidebar: React.FC = () => {
     { label: 'Agents', path: '/', icon: FiLayers },
     { label: 'Fund Mandate', path: '/fund-mandate', icon: FiFileText },
     { label: 'Sourcing Agent', path: '/sourcing-agent', icon: FiSearch },
-    { label: 'Screening Agent', path: '/screening-agent', icon: FiEye },
   ];
 
   return (
