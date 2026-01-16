@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { API } from '../utils/constants';
+import { Box,Table,TableHead,TableRow,TableCell,Typography,TableBody,IconButton,Chip,Tooltip,Pagination,TableContainer,Dialog,DialogTitle,DialogContent,DialogActions,Button,Menu,MenuItem,ListItemIcon,ListItemText,Alert,AlertTitle,} from "@mui/material"
 import toast from 'react-hot-toast';
 import { FiArrowLeft, FiArrowRight, FiCheck, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 
@@ -34,19 +35,34 @@ const SourcingAgent: React.FC = () => {
   const state = (location.state as any) ?? {};
   const parsed = state.parsedResult ?? null;
 
-  // Sourcing parameters
+  // Sourcing parameters with multiple fallback paths
   const sourcingFromState = state.sourcing ?? null;
-  const derivedSourcingFromParsed = parsed?.criteria?.mandate?.sourcing_parameters ?? parsed?.criteria?.fund_mandate?.sourcing_parameters ?? null;
+  const derivedSourcingFromParsed = 
+    parsed?.criteria?.mandate?.sourcing_parameters ?? 
+    parsed?.criteria?.fund_mandate?.sourcing_parameters ?? 
+    parsed?.criteria?.sourcing_parameters ?? 
+    parsed?.sourcing_parameters ?? 
+    null;
   const sourcingList = sourcingFromState ?? toDisplayArray(derivedSourcingFromParsed);
 
-  // Screening parameters
+  // Screening parameters with multiple fallback paths
   const screeningFromState = state.screening ?? null;
-  const derivedScreeningFromParsed = parsed?.criteria?.mandate?.screening_parameters ?? parsed?.criteria?.fund_mandate?.screening_parameters ?? null;
+  const derivedScreeningFromParsed = 
+    parsed?.criteria?.mandate?.screening_parameters ?? 
+    parsed?.criteria?.fund_mandate?.screening_parameters ?? 
+    parsed?.criteria?.screening_parameters ?? 
+    parsed?.screening_parameters ?? 
+    null;
   const screeningList = screeningFromState ?? toDisplayArray(derivedScreeningFromParsed);
 
-  // Risk analysis parameters
+  // Risk analysis parameters with multiple fallback paths
   const riskAnalysisFromState = state.riskAnalysis ?? null;
-  const derivedRiskAnalysisFromParsed = parsed?.criteria?.mandate?.risk_analysis_parameters ?? parsed?.criteria?.fund_mandate?.risk_analysis_parameters ?? null;
+  const derivedRiskAnalysisFromParsed = 
+    parsed?.criteria?.mandate?.risk_parameters ?? 
+    parsed?.criteria?.fund_mandate?.risk_parameters ?? 
+    parsed?.criteria?.risk_parameters ?? 
+    parsed?.risk_parameters ?? 
+    null;
   const riskAnalysisList = riskAnalysisFromState ?? toDisplayArray(derivedRiskAnalysisFromParsed);
 
   // Step management
@@ -224,6 +240,11 @@ const SourcingAgent: React.FC = () => {
       case 0:
         return (
           <div className="space-y-6">
+           <div className="pb-4">
+                  <p className="text-sm text-black-800">
+                    <strong>Step 1:</strong> Select the necessary sourcing parameters.
+                  </p>
+                </div>
             {sourcingList && sourcingList.length > 0 ? (
               <>
                 <button
@@ -497,56 +518,11 @@ const SourcingAgent: React.FC = () => {
           <div className="space-y-6">
             {screeningResponse?.company_details && screeningResponse.company_details.length > 0 ? (
               <>
-                <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                  <h3 className="text-lg font-semibold text-green-900 mb-2">Screening Complete!</h3>
-                  <p className="text-sm text-green-800">
-                    {screeningResponse.company_details.length} companies have passed the screening criteria.
+              <div className="pb-4">
+                  <p className="text-sm text-black-800">
+                    <strong>Step 3:</strong> Select required risk analysis parameters to identify potential risk of screened companies.
                   </p>
                 </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-4">Final Screening Results</h3>
-                  <div className="bg-white overflow-hidden rounded-lg shadow-[0_0_15px_rgba(0,0,0,0.15)]">
-                    <div className="overflow-x-auto overflow-y-auto max-h-[500px]">
-                      <table className="w-full">
-                        <thead className="sticky top-0 z-10">
-                          <tr className="bg-[#BEBEBE]">
-                            <th className="px-3 py-3 text-left text-xs font-bold text-black whitespace-nowrap">S.No.</th>
-                            {screeningResponse.company_details[0] &&
-                              Object.keys(screeningResponse.company_details[0]).map((col) => (
-                                <th
-                                  key={col}
-                                  className={`px-3 py-3 text-xs font-bold text-black whitespace-nowrap ${col === 'Company ' || col === 'Company' ? 'text-left' : 'text-center'}`}
-                                >
-                                  {col}
-                                </th>
-                              ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {screeningResponse.company_details.map((row: any, index: number) => (
-                            <tr key={index} className="hover:bg-indigo-50 transition-colors">
-                              <td className="px-3 py-3 text-sm text-black">{index + 1}.</td>
-                              {Object.entries(row).map(([col, value]: [string, any]) => (
-                                <td
-                                  key={col}
-                                  className={`px-3 py-3 text-sm whitespace-nowrap ${
-                                    col === 'Company ' || col === 'Company'
-                                      ? 'text-left text-indigo-600 font-bold'
-                                      : 'text-center text-black'
-                                  }`}
-                                >
-                                  {formatValue(value)}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-
                 {riskAnalysisList && riskAnalysisList.length > 0 ? (
                   <>
                     <button
@@ -588,7 +564,7 @@ const SourcingAgent: React.FC = () => {
                 ) : (
                   <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                     <p className="text-sm text-blue-800">
-                      <strong>Next Steps:</strong> No risk analysis parameters available. You can now review the screening results or export this data.
+                      <strong>Next Steps:</strong> No risk analysis parameters available. Risk analysis completed. You can now review the results or export this data.
                     </p>
                   </div>
                 )}
