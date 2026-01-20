@@ -1,50 +1,115 @@
 import os
 import json
 import re
+import litellm
 from typing import Optional, List
-from crewai import Agent, Task, Crew, Process, LLM
+from crewai import Agent, Task, Crew, Process
 from crewai.tools import BaseTool
 from dotenv import load_dotenv
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
 
 load_dotenv()
 
 # ============================================================================
-# LLM Configuration (Gemini)
+# AZURE LLM CONFIGURATION FROM KEYVAULT
 # ============================================================================
 
-groq_api_key = os.getenv("GROQ_API_KEY")
-google_api_key = os.getenv("GOOGLE_API_KEY")
+print("\n" + "=" * 80)
+print("🔑 AZURE LLM INITIALIZATION FROM KEYVAULT")
+print("=" * 80 + "\n")
 
-if not groq_api_key:
-    raise ValueError("GROQ_API_KEY not found in .env file!")
+# KeyVault Configuration
+KEY_VAULT_NAME = "fstodevazureopenai"
+KEY_VAULT_URL = f"https://{KEY_VAULT_NAME}.vault.azure.net/"
 
-print(f" GROQ API Key loaded: {groq_api_key[:20]}...")
+# Secret names in KeyVault
+SECRETS_MAP = {
+    "api_key": "llm-api-key",
+    "endpoint": "llm-base-endpoint",
+    "deployment": "llm-41",
+    "api_version": "llm-41-version"
+}
 
+# Global LLM config
+llm_config = None
+
+
+def get_secrets_from_key_vault():
+    """Retrieve LLM secrets from Azure Key Vault"""
+    try:
+        print(f"🔐 Connecting to KeyVault: {KEY_VAULT_NAME}")
+
+        credential = DefaultAzureCredential()
+        kv_client = SecretClient(vault_url=KEY_VAULT_URL, credential=credential)
+
+        secrets = {}
+        for key, secret_name in SECRETS_MAP.items():
+            try:
+                secret_value = kv_client.get_secret(secret_name).value
+                secrets[key] = secret_value
+                print(f"  ✓ Retrieved secret: {secret_name}")
+            except Exception as e:
+                print(f"  ❌ Failed to retrieve '{secret_name}': {e}")
+                raise
+
+        return secrets
+
+    except Exception as e:
+        print(f"❌ KeyVault authentication failed: {e}")
+        print("   Ensure you're logged in with: az login")
+        raise
+
+
+def initialize_azure_llm_config():
+    """Initialize Azure OpenAI LLM config for CrewAI"""
+    global llm_config
+
+    try:
+        print(f"\nVault Name: {KEY_VAULT_NAME}\n")
+
+        # Get secrets from KeyVault
+        secrets = get_secrets_from_key_vault()
+
+        print(f"\n✓ All secrets retrieved successfully:")
+        print(f"  - Endpoint: {secrets['endpoint'][:60]}...")
+        print(f"  - Deployment: {secrets['deployment']}")
+        print(f"  - API Version: {secrets['api_version']}")
+        print(f"  - API Key: {secrets['api_key'][:20]}...\n")
+
+        # Set environment variables for litellm/Azure
+        os.environ["AZURE_API_KEY"] = secrets['api_key']
+        os.environ["AZURE_API_BASE"] = secrets['endpoint']
+        os.environ["AZURE_API_VERSION"] = secrets['api_version']
+
+        llm_config = {
+            "model": f"azure/{secrets['deployment']}",
+            "api_key": secrets['api_key'],
+            "api_base": secrets['endpoint'],
+            "api_version": secrets['api_version'],
+            "temperature": 0.3,
+            "max_tokens": 2048
+        }
+
+        print("✅ Azure LLM configuration initialized successfully")
+        print(f"   Model: azure/{secrets['deployment']}")
+        print(f"   Endpoint: {secrets['endpoint'][:50]}...")
+        print("=" * 80 + "\n")
+
+        return llm_config
+
+    except Exception as e:
+        print(f"❌ LLM configuration failed: {e}")
+        print("=" * 80 + "\n")
+        raise
+
+
+# Initialize Azure LLM config
 try:
-    # Use GROQ with CrewAI LLM
-    llm = LLM(
-        model="groq/meta-llama/llama-4-scout-17b-16e-instruct",
-              # "llama-3.3-70b-versatile",  # Fast, reliable GROQ model
-        api_key=groq_api_key,
-        temperature=0.3,
-        max_tokens=2048
-    )
-    print("GROQ LLM initialized successfully with mixtral-8x7b-32768")
+    llm_config = initialize_azure_llm_config()
 except Exception as e:
-    print(f"LLM initialization error: {e}")
-    llm = None
-
-#
-# try:
-#     llm = LLM(
-#         model="google_ai/gemini-2.0-flash" ,
-#         api_key=os.getenv("GOOGLE_API_KEY"),
-#         temperature=0.3
-#     )
-#     print("✅ LLM initialized successfully")
-# except Exception as e:
-#     print(f"❌ LLM initialization error: {e}")
-#     llm = None
+    print(f"❌ Failed to initialize Azure LLM: {e}")
+    raise
 
 
 # ============================================================================
@@ -140,6 +205,7 @@ def screen_companies_simple(mandate_parameters: dict, companies: list) -> list:
                 sector = company.get("Sector", company.get("sector", "Unknown"))
 
                 all_passed = True
+                reason_parts = []
 
                 for param_name, constraint_str in mandate_parameters.items():
                     operator, threshold = parse_constraint(constraint_str)
@@ -147,18 +213,25 @@ def screen_companies_simple(mandate_parameters: dict, companies: list) -> list:
 
                     if company_value is None:
                         all_passed = False
+                        reason_parts.append(f"{param_name}: N/A ❌")
                         break
 
-                    if not compare_values(company_value, operator, threshold):
+                    comparison_result = compare_values(company_value, operator, threshold)
+
+                    if comparison_result:
+                        reason_parts.append(f"{param_name}: {company_value} {operator} {threshold} ✅")
+                    else:
                         all_passed = False
+                        reason_parts.append(f"{param_name}: {company_value} {operator} {threshold} ❌")
                         break
 
                 if all_passed:
+                    reason = " | ".join(reason_parts)
                     passed_companies.append({
                         "company_name": company_name,
                         "sector": sector,
                         "status": "PASS",
-                        "reason": f"{company_name} meets all mandate criteria. Strong financial metrics aligned with fund objectives.",
+                        "reason": reason,
                         "company_details": company
                     })
 
@@ -175,79 +248,77 @@ def screen_companies_simple(mandate_parameters: dict, companies: list) -> list:
 # ============================================================================
 # CUSTOM TOOL: Financial Screening
 # ============================================================================
-# ...existing code...
 
 class FinancialScreeningTool(BaseTool):
-    """
-    Validates companies against mandate parameters.
-    Takes mandate parameters and company list, returns only PASSED companies.
-    """
+    """Validates companies against mandate parameters"""
     name: str = "financial_screening_tool"
     description: str = """Screen companies against mandate parameters and return only those that pass ALL criteria."""
 
     def _run(self, mandate_parameters: dict, companies: list) -> str:
-        """
-        Screen companies and return only passed ones
-
-        Args:
-            mandate_parameters: dict with screening criteria
-            companies: list of company dicts to screen
-
-        Returns:
-            JSON string with passed companies in wrapped format
-        """
+        """Screen companies"""
         try:
-            print(f"\n Tool Screening {len(companies)} companies against {len(mandate_parameters)} criteria...")
+            print(f"\n🛠️  TOOL EXECUTING: financial_screening_tool")
+            print(f"📋 Screening {len(companies)} companies against {len(mandate_parameters)} criteria\n")
 
             if not mandate_parameters or not companies:
-                print("Empty mandate or companies list")
                 return json.dumps({"company_details": []})
 
             passed_companies = screen_companies_simple(mandate_parameters, companies)
-            print(f"Tool Result: {len(passed_companies)} companies passed")
+
+            print(f"\n✅ TOOL RESULT: {len(passed_companies)} companies passed\n")
 
             company_details_list = []
             for company in passed_companies:
-                company_data = company["company_details"].copy()  # Get full company object
+                company_data = company["company_details"].copy()
                 company_data["status"] = "Pass"
-                company_data["reason"]=""
-                # company_data["reason"] = company.get("reason", "")
+                company_data["reason"] = company.get("reason", "")
                 company_details_list.append(company_data)
 
-            formatted_response = {
-                "company_details": company_details_list
-            }
-
-            print(f"Tool Output: {json.dumps(formatted_response, default=str)[:300]}...")
-            return json.dumps(formatted_response, default=str)
+            return json.dumps({"company_details": company_details_list}, default=str)
 
         except Exception as e:
-            print(f"Tool Error: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ Tool Error: {str(e)}")
             return json.dumps({"company_details": []})
 
+
 # ============================================================================
-# CREWAI AGENT
+# CREWAI AGENT SETUP - Uses Azure LLM via litellm
 # ============================================================================
 
 try:
+    # Create a custom LLM class that wraps litellm
+    from crewai import LLM
+
+    # Use litellm directly with Azure config from KeyVault
+    azure_llm = LLM(
+        model=llm_config["model"],
+        api_key=llm_config["api_key"],
+        base_url=llm_config["api_base"],
+        api_version=llm_config["api_version"],
+    )
+
+    print(f"✅ Azure LLM created: {llm_config['model']}")
+
     financial_screening_agent = Agent(
         role="Financial Screening Specialist",
         goal="""Evaluate companies against fund mandate parameters.
         Use financial_screening_tool to validate each company.
         Return ONLY valid JSON output with screening results.""",
         backstory="""You are an expert financial analyst specializing in investment screening.
-        You have deep knowledge of financial metrics, valuation multiples, and 
+        You have deep knowledge of financial metrics, valuation multiples, and
         institutional investment criteria. You evaluate companies objectively
-        against predefined mandate parameters.""",
-        llm=llm,
+        against predefined mandate parameters. Think through each decision carefully.""",
         tools=[FinancialScreeningTool()],
         verbose=True,
-        allow_delegation=False
+        allow_delegation=False,
+        llm=azure_llm
     )
+    print("✅ Agent initialized successfully\n")
 except Exception as e:
-    print(f"Agent initialization error: {e}")
+    print(f"❌ Agent initialization error: {e}")
+    import traceback
+
+    traceback.print_exc()
     financial_screening_agent = None
 
 # ============================================================================
@@ -255,63 +326,48 @@ except Exception as e:
 # ============================================================================
 
 try:
-    screen_companies_task = Task(
-        description="""Screen companies against fund mandate parameters.
+    if financial_screening_agent:
+        screen_companies_task = Task(
+            description="""Screen companies against fund mandate parameters.
 
-        Mandate Parameters:
-        {mandate_parameters}
+            Mandate Parameters:
+            {mandate_parameters}
 
-        Companies to Screen:
-        {companies_list}
+            Companies to Screen:
+            {companies_list}
 
-        TASK:
-        1. Use financial_screening_tool with mandate_parameters and companies_list
-        2. Tool returns JSON with ONLY passed companies
-        3. Extract results and return as JSON
-        4.provide the reason for the particular company why it has passed the screening dynamically according to the threshold comparison against the mandate_parameters.add in the output json in the reason key.
+            TASK:
+            1. Analyze each company carefully against the mandate parameters
+            2. Use financial_screening_tool to perform screening
+            3. Tool returns JSON with ONLY passed companies
+            4. Provide the reason why each company passed
+            5. Think through the screening logic step by step
 
-        OUTPUT FORMAT (STRICT JSON):
-        {
-            "company_details": [
-                {
-                    "Company": "company_name",
-                    "Country": "country",
-                    "Sector": "sector",
-                    "status": "Pass",
-                    "reason": "reason it has passed",
-                    ... all financial metrics
-                }
-            ]
-        }
-        """,
-        expected_output="""Valid JSON array with ONLY passed companies:
-        {
-            "company_details": [
-                {
-                    "Company": "company_name",
-                    "Country": "country",
-                    "Sector": "sector",
-                    "status": "Pass",
-                    "reason": "{
-            "company_details": [
-                {
-                    "Company": "company_name",
-                    "Country": "country",
-                    "Sector": "sector",
-                    "status": "Pass",
-                    "reason": "",
-                    ... all financial metrics
-                }
-            ]
-        }",
-                    ... all financial metrics
-                }
-            ]
-        }""",
-        agent=financial_screening_agent
-    )
+            OUTPUT FORMAT (STRICT JSON):
+            {
+                "company_details": [
+                    {
+                        "Company": "company_name",
+                        "Country": "country",
+                        "Sector": "sector",
+                        "status": "Pass",
+                        "reason": "reason it has passed with metric comparisons",
+                        ... all financial metrics
+                    }
+                ]
+            }
+            """,
+            expected_output="""Valid JSON with ONLY passed companies.""",
+            agent=financial_screening_agent
+        )
+        print("✅ Task initialized successfully\n")
+    else:
+        screen_companies_task = None
 except Exception as e:
-    print(f"Task initialization error: {e}")
+    print(f"❌ Task initialization error: {e}")
+    import traceback
+
+    traceback.print_exc()
     screen_companies_task = None
 
 # ============================================================================
@@ -319,12 +375,19 @@ except Exception as e:
 # ============================================================================
 
 try:
-    screening_crew = Crew(
-        agents=[financial_screening_agent],
-        tasks=[screen_companies_task],
-        process=Process.sequential,
-        verbose=True
-    )
+    if financial_screening_agent and screen_companies_task:
+        screening_crew = Crew(
+            agents=[financial_screening_agent],
+            tasks=[screen_companies_task],
+            process=Process.sequential,
+            verbose=True
+        )
+        print("✅ Screening Crew initialized successfully\n")
+    else:
+        screening_crew = None
 except Exception as e:
-    print(f"Crew initialization error: {e}")
+    print(f"❌ Crew initialization error: {e}")
+    import traceback
+
+    traceback.print_exc()
     screening_crew = None
