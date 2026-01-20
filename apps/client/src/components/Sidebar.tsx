@@ -10,8 +10,8 @@ const Sidebar: React.FC = () => {
 
   const navItems = [
     { label: 'Agents', path: '/', icon: FiLayers },
-    { label: 'Fund Mandate', path: '/fund-mandate', icon: FiFileText },
-    { label: 'Sourcing Agent', path: '/sourcing-agent', icon: FiSearch },
+    { label: 'Mandate Processing', path: '/fund-mandate', icon: FiFileText },
+    { label: 'Fund Mandate', path: '/sourcing-agent', icon: FiSearch },
   ];
 
   return (

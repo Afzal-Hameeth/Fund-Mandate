@@ -1,4 +1,5 @@
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 src_path = Path(__file__).parent
@@ -9,6 +10,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from parsing_sourcing_routes import router as parsing_router
 from fundMandate import router as mandate_router
 from risk_api import router as risk_router
+
+from database.db import init_db, close_db
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    await init_db()
+    yield
+
+    await close_db()
 
 
 app = FastAPI(

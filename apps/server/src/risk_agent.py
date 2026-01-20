@@ -2,24 +2,75 @@ import json
 import os
 from dotenv import load_dotenv
 from typing import List, Dict, Any, Annotated
-from pydantic import BaseModel, Field, ValidationError
-from langchain_groq import ChatGroq
+from pydantic import BaseModel, Field
+from langchain_openai import AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.callbacks import BaseCallbackHandler
 from langgraph.graph import StateGraph, END
 from typing_extensions import TypedDict
 from operator import add
 import re
-from datetime import datetime
 import sys
-from io import StringIO
+from azure.keyvault.secrets import SecretClient
+from azure.identity import DefaultAzureCredential
 
 load_dotenv()
 
-if not os.getenv("GROQ_API_KEY"):
-    raise ValueError("❌ GROQ_API_KEY missing in .env")
+# --- AZURE CONFIG ---
+OPENAI_API_VERSION = "2024-12-01-preview"
+AZURE_OPENAI_ENDPOINT = "https://stg-secureapi.hexaware.com/api/azureai"
+KEYVAULT_URI = "https://kvcapabilitycompass.vault.azure.net/"
+SECRET_NAME = "kvCapabilityCompassKeyLLM"
+DEPLOYMENT_NAME = "gpt-4o"
 
-print("✅ Groq loaded")
+
+# === STREAMING TOKEN CALLBACK ===
+class StreamingTokenCallback(BaseCallbackHandler):
+    """Callback to capture LLM tokens and stream them in real-time"""
+
+    def __init__(self):
+        self.buffer = ""
+
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        """Capture each token and print it immediately"""
+        self.buffer += token
+        # Flush on punctuation or every 50 chars for better real-time feel
+        if any(char in token for char in ['.', '!', '?', ',', ':', '\n']) or len(self.buffer) > 50:
+            print(self.buffer, end="", flush=True)
+            self.buffer = ""
+
+    def on_llm_end(self, response, **kwargs) -> None:
+        """Flush any remaining tokens"""
+        if self.buffer:
+            print(self.buffer, end="", flush=True)
+            self.buffer = ""
+
+
+def get_azure_llm():
+    """Initialize Azure OpenAI LLM with KeyVault authentication and streaming"""
+    try:
+        credential = DefaultAzureCredential()
+        kvclient = SecretClient(vault_url=KEYVAULT_URI, credential=credential)
+        api_key = kvclient.get_secret(SECRET_NAME).value
+        return AzureChatOpenAI(
+            azure_deployment=DEPLOYMENT_NAME,
+            openai_api_version=OPENAI_API_VERSION,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_key=api_key,
+            temperature=0.0,  # ✅ Deterministic
+            streaming=True,  # ✅ Enable streaming for real-time token output
+            callbacks=[StreamingTokenCallback()]  # ✅ Stream tokens as they come
+        )
+    except Exception as e:
+        print(f"❌ Failed to initialize Azure LLM: {str(e)}")
+        raise e
+
+
+# Initialize LLM
+print("🔑 Authenticating with Azure KeyVault...")
+llm = get_azure_llm()
+print("✅ Azure OpenAI LLM Initialized")
 
 
 def clean_numeric_value(value):
@@ -29,13 +80,13 @@ def clean_numeric_value(value):
     """
     if isinstance(value, (int, float)):
         return float(value)
-    
+
     if not isinstance(value, str):
         return 0.0
-    
+
     # Remove common suffixes: x, %, %, bps, etc.
     cleaned = value.strip().rstrip('xX%bpsBPS ').strip()
-    
+
     # Try to convert to float
     try:
         return float(cleaned)
@@ -43,27 +94,24 @@ def clean_numeric_value(value):
         return 0.0
 
 
-def load_data():
-    # Resolve data files relative to the repository layout: apps/server/data/*.json
-    from pathlib import Path
+def load_data(companies: List[Dict], mandate: Dict):
+    """
+    Load and validate companies and mandate data passed from frontend.
 
-    base_dir = Path(__file__).resolve().parent.parent  # apps/server/src -> apps/server
-    data_dir = base_dir / "data"
+    Args:
+        companies: List of company dictionaries
+        mandate: Dictionary of mandate/risk parameters
 
-    mandate_path = data_dir / "fund_mandate.json"
+    Returns:
+        Tuple of (companies, mandate)
+    """
+    if not companies:
+        raise ValueError("❌ Companies list cannot be empty")
+    if not mandate:
+        raise ValueError("❌ Mandate parameters cannot be empty")
 
-    if not mandate_path.exists():
-        raise FileNotFoundError(f"❌ {mandate_path} missing")
-
-    with open(mandate_path, "r", encoding="utf-8") as f:
-        fund_data = json.load(f)
-    
-    # Extract companies and mandate from fund_mandate.json structure
-    companies = fund_data.get("companies", [])
-    risk_parameters = fund_data.get("risk_parameters", {})
-    
-    print(f"📊 {len(companies)} companies loaded")
-    return companies, risk_parameters
+    print(f"📊 {len(companies)} companies loaded from request")
+    return companies, mandate
 
 
 # === MODELS ===
@@ -90,10 +138,8 @@ class AgentState(TypedDict):
 
 
 # === LLM ===
-llm = ChatGroq(
-    model="qwen/qwen3-32b",
-    temperature=0.0  # ✅ Deterministic
-)
+# LLM instance is created per-request to enable streaming callbacks
+# See get_azure_llm() function above
 
 
 # === ROBUST JSON PARSER ===
@@ -167,6 +213,7 @@ def analyze_companies_llm(state: AgentState) -> AgentState:
         company_name = company.get('Company ') or company.get('Company', f'Company_{i}')
         try:
             print(f"\n🔍 LLM → {company_name}")
+            print(f"   ⏳ Loading company data...")
 
             # Clean numeric values that may have suffixes (e.g., '0.1938x' → 0.1938)
             debt_equity = clean_numeric_value(company.get('Debt / Equity', 0))
@@ -174,8 +221,13 @@ def analyze_companies_llm(state: AgentState) -> AgentState:
             pe = clean_numeric_value(company.get('P/E Ratio', 0))
             risks = company.get('Risks', {})
 
-            # Raw LLM call + manual parse ✅ FIXED
-            raw_response = prompt | llm
+            print(f"   ⏳ Sending to LLM for analysis...")
+
+            # Create fresh LLM instance with streaming callback for this company
+            llm_streaming = get_azure_llm()
+            raw_response = prompt | llm_streaming
+            print("   🧠 LLM Thinking: ", end="", flush=True)
+
             response = raw_response.invoke({
                 "company_name": company_name,
                 "debt_equity": debt_equity, "roe": roe, "pe": pe,
@@ -184,6 +236,7 @@ def analyze_companies_llm(state: AgentState) -> AgentState:
                 "format_instructions": parser.get_format_instructions()
             })
 
+            print(f"\n   ⏳ Parsing LLM response...")
             analysis = parser.parse_result(response)
 
             # Show LLM comparisons
@@ -221,16 +274,16 @@ def format_results(state: AgentState) -> AgentState:
     """Format and print results table"""
     filtered = state["filtered_companies"]
     total = len(state["companies"])
-    
+
     print("\n" + "=" * 80)
     print("🏆 INVESTABLE COMPANIES (LLM w/ MANDATE COMPARISONS)")
     print("=" * 80)
     for i, c in enumerate(filtered, 1):
         print(f"{i:2d}. {c.company_name:<30} | {c.overall_risk_score:5.1f} | {c.recommendation}")
-    
+
     passed = len(filtered)
     print(f"\n📊 {passed}/{total} ({100 * passed / total:.1f}%) PASS")
-    
+
     return {}  # No state changes needed
 
 
@@ -245,74 +298,3 @@ workflow.add_edge("filter", "format")
 workflow.add_edge("format", END)
 
 app = workflow.compile()
-
-
-def save_analysis_to_json(result, logs):
-    """Save analysis result with terminal logs to JSON file"""
-    analyses = result.get("analyses", [])
-    filtered = result.get("filtered_companies", [])
-
-    analyses_json = []
-    for analysis in analyses:
-        analyses_json.append({
-            "company_name": analysis.company_name,
-            "overall_risk_score": analysis.overall_risk_score,
-            "risk_scores": [
-                {
-                    "category": rs.category,
-                    "score": rs.score,
-                    "reason": rs.reason,
-                    "severity": rs.severity
-                } for rs in analysis.risk_scores
-            ],
-            "passes_mandate": analysis.passes_mandate,
-            "recommendation": analysis.recommendation
-        })
-
-    filtered_json = []
-    for analysis in filtered:
-        filtered_json.append({
-            "company_name": analysis.company_name,
-            "overall_risk_score": analysis.overall_risk_score,
-            "risk_scores": [
-                {
-                    "category": rs.category,
-                    "score": rs.score,
-                    "reason": rs.reason,
-                    "severity": rs.severity
-                } for rs in analysis.risk_scores
-            ],
-            "passes_mandate": analysis.passes_mandate,
-            "recommendation": analysis.recommendation
-        })
-
-    total = len(analyses_json)
-    passed = len(filtered_json)
-
-    # Create result object with logs
-    result_data = {
-        "timestamp": datetime.now().isoformat(),
-        "summary": {
-            "total": total,
-            "passed": passed,
-            "failed": total - passed,
-            "pass_rate": round((passed / total * 100) if total > 0 else 0, 1)
-        },
-        "logs": logs,
-        "all_companies": analyses_json,
-        "investable_companies": filtered_json
-    }
-
-    return result_data
-
-
-if __name__ == "__main__":
-    companies, mandate = load_data()
-    print(f"Starting LLM analysis of {len(companies)} companies...")
-
-    result = app.invoke({
-        "companies": companies,
-        "mandate": mandate,
-        "analyses": [],
-        "filtered_companies": []
-    })
