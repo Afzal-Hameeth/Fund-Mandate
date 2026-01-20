@@ -77,7 +77,6 @@ const SourcingAgent: React.FC = () => {
   const [screeningResponse, setScreeningResponse] = useState<any>(null);
   const [riskAnalysisResponse, setRiskAnalysisResponse] = useState<any>(null);
   const [expandedScreeningResults, setExpandedScreeningResults] = useState<Record<number, boolean>>({});
-  const [expandedRiskResults, setExpandedRiskResults] = useState<Record<number, boolean>>({});
   const [companyDetailOpen, setCompanyDetailOpen] = useState(false);
   const [selectedCompanyDetail, setSelectedCompanyDetail] = useState<any>(null);
   const screeningResultsRef = useRef<HTMLDivElement>(null);
@@ -110,10 +109,6 @@ const SourcingAgent: React.FC = () => {
 
   const toggleScreeningResult = (index: number) => {
     setExpandedScreeningResults((prev) => ({ ...prev, [index]: !prev[index] }));
-  };
-
-  const toggleRiskResult = (index: number) => {
-    setExpandedRiskResults((prev) => ({ ...prev, [index]: !prev[index] }));
   };
 
   const openCompanyDetail = (company: any) => {
@@ -320,6 +315,68 @@ const SourcingAgent: React.FC = () => {
       toast.error('Failed to analyze risk');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const exportRiskAnalysisToCSV = () => {
+    if (!riskAnalysisResponse?.all_companies) {
+      toast.error('No data to export');
+      return;
+    }
+
+    try {
+      // Prepare CSV headers
+      const headers = ['S.No.', 'Company Name', 'Overall Score', 'Category', 'Score', 'Reason'];
+      
+      // Prepare CSV rows
+      const rows: string[][] = [];
+      let rowNumber = 1;
+
+      riskAnalysisResponse.all_companies.forEach((company: any, companyIndex: number) => {
+        company.risk_scores?.forEach((risk: any, riskIndex: number) => {
+          rows.push([
+            String(rowNumber++),
+            company.company_name,
+            company.overall_risk_score?.toFixed(1) ?? '0.0',
+            risk.category,
+            risk.score,
+            risk.reason
+          ]);
+        });
+      });
+
+      // Escape CSV values (handle commas and quotes)
+      const escapeCSV = (value: string) => {
+        if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+          return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+      };
+
+      // Build CSV content
+      const csvContent = [
+        headers.map(escapeCSV).join(','),
+        ...rows.map(row => row.map(escapeCSV).join(','))
+      ].join('\n');
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      const timestamp = new Date().toISOString().slice(0, 10);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `risk-analysis-${timestamp}.csv`);
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success('Risk analysis data exported to CSV');
+    } catch (err) {
+      console.error('Error exporting CSV:', err);
+      toast.error('Failed to export CSV');
     }
   };
 
@@ -657,52 +714,79 @@ const SourcingAgent: React.FC = () => {
                       </div>
                     )}
 
-                    {riskAnalysisResponse?.investable_companies ? (
+                    {riskAnalysisResponse?.all_companies ? (
                       <div ref={riskAnalysisResultsRef} className="mt-6">
-                        <div className="mb-4">
-                          <h3 className="text-lg font-bold text-gray-900">List of companies passed the criteria</h3>
-                          <p className="text-sm text-gray-600">
-                            {riskAnalysisResponse.investable_companies.length} companies passed screening criteria
-                          </p>
+                        <div className="mb-4 flex items-center justify-between">
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">Risk Analysis Results</h3>
+                            <p className="text-sm text-gray-600">
+                              {riskAnalysisResponse.summary?.passed ?? 0} out of {riskAnalysisResponse.summary?.total ?? 0} companies passed risk criteria
+                            </p>
+                          </div>
+                          <button
+                            onClick={exportRiskAnalysisToCSV}
+                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                          >
+                            Export as CSV
+                          </button>
                         </div>
-                        <div className="space-y-2">
-                          {riskAnalysisResponse.investable_companies.map((company: any, index: number) => (
-                            <div key={index}>
-                              <button
-                                onClick={() => toggleRiskResult(index)}
-                                className="flex items-center gap-3 py-2 hover:text-gray-700 transition-colors"
-                              >
-                                {expandedRiskResults[index] ? (
-                                  <FiChevronUp className="w-5 h-5 text-gray-600" />
-                                ) : (
-                                  <FiChevronDown className="w-5 h-5 text-gray-600" />
-                                )}
-                                <span className="text-sm font-semibold text-gray-900">{company.company_name}</span>
-                                <span className={`ml-2 px-2 py-0.5 rounded text-xs font-semibold ${
-                                  company.overall_risk_score <= 2 ? 'bg-green-100 text-green-800' :
-                                  company.overall_risk_score <= 5 ? 'bg-yellow-100 text-yellow-800' :
-                                  'bg-red-100 text-red-800'
-                                }`}>
-                                  {company.overall_risk_score?.toFixed(1) ?? '0.0'}
-                                </span>
-                              </button>
-                              {expandedRiskResults[index] && (
-                                <div className="pl-8 py-2 space-y-2">
-                                  {company.risk_scores?.map((risk: any, riskIndex: number) => (
-                                    <div key={riskIndex} className="text-sm">
-                                      <span className="font-medium text-gray-900">{risk.category}: </span>
-                                      <span className="text-gray-600">{risk.reason} </span>
-                                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${
-                                        risk.score === 'GREEN' ? 'bg-green-100 text-green-800' :
-                                        risk.score === 'YELLOW' ? 'bg-yellow-100 text-yellow-800' :
-                                        risk.score === 'RED' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
-                                      }`}>{risk.score}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
+                        <div className="bg-white overflow-hidden rounded-lg shadow-[0_0_15px_rgba(0,0,0,0.15)]">
+                          <div className="overflow-x-auto overflow-y-auto max-h-[500px]">
+                            <table className="w-full">
+                              <thead className="sticky top-0 z-10">
+                                <tr className="bg-[#BEBEBE]">
+                                  <th className="px-2 py-3 text-left text-xs font-bold text-black w-12">S.No.</th>
+                                  <th className="px-3 py-3 text-left text-xs font-bold text-black min-w-[150px]">Company Name</th>
+                                  <th className="px-3 py-3 text-center text-xs font-bold text-black min-w-[100px]">Overall Score</th>
+                                  <th className="px-3 py-3 text-left text-xs font-bold text-black min-w-[180px]">Category</th>
+                                  <th className="px-3 py-3 text-center text-xs font-bold text-black min-w-[80px]">Score</th>
+                                  <th className="px-3 py-3 text-left text-xs font-bold text-black min-w-[300px]">Reason</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {riskAnalysisResponse.all_companies.map((company: any, companyIndex: number) => (
+                                  company.risk_scores?.map((risk: any, riskIndex: number) => (
+                                    <tr key={`${companyIndex}-${riskIndex}`} className="hover:bg-indigo-50 transition-colors border-b border-gray-200">
+                                      {riskIndex === 0 && (
+                                        <td rowSpan={company.risk_scores.length} className="px-2 py-3 text-sm text-black w-12 align-top font-semibold">
+                                          {companyIndex + 1}.
+                                        </td>
+                                      )}
+                                      {riskIndex === 0 && (
+                                        <td rowSpan={company.risk_scores.length} className="px-3 py-3 text-sm text-indigo-600 font-bold align-top min-w-[150px] break-words">
+                                          {company.company_name}
+                                        </td>
+                                      )}
+                                      {riskIndex === 0 && (
+                                        <td rowSpan={company.risk_scores.length} className="px-3 py-3 text-sm text-center font-bold align-top min-w-[100px]">
+                                          <span className={`inline-block px-3 py-1 rounded text-xs font-semibold whitespace-nowrap ${
+                                            company.overall_risk_score <= 2 ? 'bg-green-100 text-green-800' :
+                                            company.overall_risk_score <= 5 ? 'bg-yellow-100 text-yellow-800' :
+                                            'bg-red-100 text-red-800'
+                                          }`}>
+                                            {company.overall_risk_score?.toFixed(1) ?? '0.0'}
+                                          </span>
+                                        </td>
+                                      )}
+                                      <td className="px-3 py-3 text-sm text-gray-900 font-medium min-w-[180px]">{risk.category}</td>
+                                      <td className="px-3 py-3 text-sm text-center min-w-[80px]">
+                                        <span className={`inline-block px-2 py-1 rounded text-xs font-semibold whitespace-nowrap ${
+                                          risk.score === 'GREEN' ? 'bg-green-100 text-green-800' :
+                                          risk.score === 'YELLOW' ? 'bg-yellow-100 text-yellow-800' :
+                                          risk.score === 'RED' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
+                                        }`}>
+                                          {risk.score}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-3 text-sm text-gray-700 min-w-[300px]" title={risk.reason}>
+                                        <span className="block truncate">{risk.reason}</span>
+                                      </td>
+                                    </tr>
+                                  ))
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       </div>
                     ) : null}
@@ -879,15 +963,36 @@ const SourcingAgent: React.FC = () => {
         <DialogTitle className="font-bold text-sm py-2">
           {selectedCompanyDetail?.['Company '] || selectedCompanyDetail?.['Company'] || 'Company Details'}
         </DialogTitle>
-        <DialogContent dividers sx={{ padding: '12px' }}>
+        <DialogContent dividers sx={{ padding: '12px', overflowY: 'auto' }}>
           {selectedCompanyDetail && (
-            <div className="space-y-1">
-              {Object.entries(selectedCompanyDetail).map(([key, value]: [string, any]) => (
-                <div key={key} className="flex border-b border-gray-100 pb-1">
-                  <span className="font-medium text-gray-700 w-1/3 text-xs">{key}:</span>
-                  <span className="text-gray-900 w-2/3 text-xs">{formatValue(value)}</span>
+            <div className="space-y-2">
+              {Object.entries(selectedCompanyDetail).map(([key, value]: [string, any]) => {
+                // Skip Risks as we'll handle it separately
+                if (key === 'Risks' || key === 'risks') {
+                  return null;
+                }
+                return (
+                  <div key={key} className="flex border-b border-gray-100 pb-1">
+                    <span className="font-medium text-gray-700 w-1/3 text-xs">{key}:</span>
+                    <span className="text-gray-900 w-2/3 text-xs">{formatValue(value)}</span>
+                  </div>
+                );
+              })}
+              
+              {/* Display Risks if available */}
+              {(selectedCompanyDetail?.['Risks'] || selectedCompanyDetail?.['risks']) && (
+                <div className="mt-3 pt-2 border-t border-gray-200">
+                  <div className="font-bold text-xs text-gray-800 mb-2">Risks:</div>
+                  <div className="space-y-1 pl-2">
+                    {Object.entries(selectedCompanyDetail['Risks'] || selectedCompanyDetail['risks']).map(([riskKey, riskValue]: [string, any]) => (
+                      <div key={riskKey} className="border-b border-gray-100 pb-1">
+                        <span className="font-medium text-gray-700 text-xs">{riskKey}:</span>
+                        <div className="text-gray-900 text-xs mt-0.5 ml-2">{formatValue(riskValue)}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
+              )}
             </div>
           )}
         </DialogContent>

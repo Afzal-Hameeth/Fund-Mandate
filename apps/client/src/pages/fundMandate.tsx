@@ -212,7 +212,7 @@ const FundMandate: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div>
-                <h1 className="text-xl font-bold">Fund Mandate</h1>
+                <h1 className="text-xl font-bold">Mandate Processing</h1>
                 <p className="text-xs text-muted-foreground">
                   Upload and process fund mandate documents
                 </p>
@@ -239,7 +239,7 @@ const FundMandate: React.FC = () => {
               </div>
 
               <p className="text-gray-600 text-sm leading-relaxed mb-3">
-                Upload your fund mandate documents in PDF format. Provide a clear description to help our AI agent understand the context and requirements.
+                Upload your fund mandate documents in PDF format. Fund mandate document contains set of rules and guidelines that defines how a fund must be managed.
               </p>
 
               <div className="bg-white/70 rounded-lg p-3 border border-indigo-100 mb-3">
@@ -251,10 +251,6 @@ const FundMandate: React.FC = () => {
                   <div className="flex items-center">
                     <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full mr-3 flex-shrink-0"></span>
                     <span>PDF files only</span>
-                  </div>
-                  <div className="flex items-center">
-                    <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full mr-3 flex-shrink-0"></span>
-                    <span>Clear description required</span>
                   </div>
                 </div>
               </div>
@@ -410,7 +406,7 @@ const FundMandate: React.FC = () => {
                   </button>
                   {openSections.sourcing && (
                     <div className="py-6 animate-in fade-in slide-in-from-top-1 duration-300">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {getMandatoryThresholds().map((threshold) => (
                           <div key={threshold.key} className="flex flex-col gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
                             <div className="flex items-center gap-2">
@@ -436,7 +432,7 @@ const FundMandate: React.FC = () => {
                   </button>
                   {openSections.screening && (
                     <div className="py-6 animate-in fade-in slide-in-from-top-1 duration-300">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {getPreferredMetrics().map((metric) => (
                           <div key={metric.key} className="flex flex-col gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
                             <div className="flex items-center gap-2">

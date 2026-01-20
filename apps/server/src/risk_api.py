@@ -79,8 +79,8 @@ class RiskAnalysisResponse(BaseModel):
 
 router = APIRouter(prefix="/risk", tags=["risk-analysis"])
 
-# Load default data
-companies, mandate = load_data()
+# # Load default data
+# companies, mandate = load_data()
 
 
 def parse_logs_to_structured(logs: str) -> list:
