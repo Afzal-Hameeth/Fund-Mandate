@@ -25,10 +25,8 @@ def get_langchain_llm():
         deployment = kv_client.get_secret("llm-41").value
         api_version = kv_client.get_secret("llm-41-version").value
 
-        print(f" Config loaded: {deployment} @ {endpoint[:40]}...")
-
     except Exception as e:
-        print(f" Key Vault error: {e}")
+
         raise
 
     # 4. ✅ LANGCHAIN AzureChatOpenAI (supports .invoke() + agents)

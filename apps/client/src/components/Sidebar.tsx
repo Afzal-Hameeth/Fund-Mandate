@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {useLocation, NavLink } from 'react-router-dom';
-import {FiLayers, FiChevronLeft, FiChevronRight, FiFileText, FiEye, FiSearch } from 'react-icons/fi';
+import {FiLayers, FiChevronLeft, FiChevronRight, FiFileText, FiSearch } from 'react-icons/fi';
 
 const Sidebar: React.FC = () => {
  

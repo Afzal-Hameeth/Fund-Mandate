@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API } from '../utils/constants';
-import { FiUpload, FiFileText, FiSend, FiFile, FiTrash, FiChevronDown, FiChevronUp } from 'react-icons/fi';
+import { FiUpload, FiSend, FiFile, FiTrash, FiChevronDown, FiChevronUp, FiChevronLeft, FiChevronRight, FiMessageSquare } from 'react-icons/fi';
+import { Skeleton } from '@mui/material';
 import toast from 'react-hot-toast';
 
 const FundMandate: React.FC = () => {
@@ -18,7 +19,14 @@ const FundMandate: React.FC = () => {
     risk: false,
   });
 
+  // Streaming state
+  const [streamingEvents, setStreamingEvents] = useState<any[]>([]);
+  const [showStreamingPanel, setShowStreamingPanel] = useState(false);
+  const [agentThinkingOpen, setAgentThinkingOpen] = useState(true);
+  const [wsConnId, setWsConnId] = useState<string | null>(null);
+
   const extractedParamsRef = useRef<HTMLDivElement>(null);
+  const streamingPanelRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   // Auto-scroll to extracted parameters when submission is successful
@@ -30,6 +38,13 @@ const FundMandate: React.FC = () => {
       });
     }
   }, [isSubmitted]);
+
+  // Auto-scroll streaming panel to bottom on new events
+  useEffect(() => {
+    if (streamingPanelRef.current) {
+      streamingPanelRef.current.scrollTop = streamingPanelRef.current.scrollHeight;
+    }
+  }, [streamingEvents]);
 
   const toggleSection = (section: string) => {
     setOpenSections((prev) => ({
@@ -100,98 +115,129 @@ const FundMandate: React.FC = () => {
     setIsSubmitted(false);
     setParsedResult(null);
     setApiError(null);
+    setStreamingEvents([]);
+    setShowStreamingPanel(true);
+    setAgentThinkingOpen(true);
 
     try {
-      // Prepare multipart form data for the backend API
+      // Step 1: Upload file to /api/parse-mandate-upload
       const formData = new FormData();
-      formData.append('pdf', selectedFile as File);
+      formData.append('file', selectedFile as File);
       formData.append('query', description.trim());
 
-      const response = await fetch(`${API.BASE_URL()}/api/parse-mandate`, {
+      const uploadResponse = await fetch(API.makeUrl(API.ENDPOINTS.FUND_MANDATE.UPLOAD()), {
         method: 'POST',
         body: formData,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || `API error: ${response.status}`);
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        throw new Error(errorText || `Upload API error: ${uploadResponse.status}`);
       }
 
-      const data = await response.json();
-      
-      // Debug: Log the actual response structure
-      console.log('API Response:', data);
-      console.log('Criteria structure:', data.criteria);
+      const uploadData = await uploadResponse.json();
+      console.log('Upload response:', uploadData);
 
-      // Store parsed result and show UI
-      setParsedResult(data);
-      setSelectedFile(null);
-      setDescription('');
-      setErrors({});
-      
-      // Show success toast
-      toast.success('Fund mandate processed successfully! Parameters extracted.');
-      
-      setIsSubmitted(true);
+      // Extract filename and query from upload response
+      const filename = uploadData.filename || selectedFile.name;
+      const query = uploadData.query || description.trim();
+      const connId = `mandate-${Date.now()}`;
+
+      setWsConnId(connId);
+
+      // Step 2: Connect to WebSocket for parsing with streaming
+      const wsUrl = API.wsUrl(API.ENDPOINTS.FUND_MANDATE.WS_PARSE(connId));
+      console.log('Connecting to WebSocket:', wsUrl);
+
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        // Send pdf_name and query to server (server expects pdf_name, not filename)
+        ws.send(JSON.stringify({ pdf_name: filename, query }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const eventData = JSON.parse(event.data);
+          console.log('WebSocket event:', eventData);
+
+          setStreamingEvents((prev) => [...prev, eventData]);
+
+          if (eventData.type === 'analysis_complete' && eventData.criteria) {
+            // Extract and set parsed result from criteria
+            const result = {
+              criteria: eventData.criteria,
+              message: eventData.message || '✅ Mandate parsing complete!'
+            };
+            setParsedResult(result);
+            setShowStreamingPanel(false);
+            setIsSubmitting(false);
+            setIsSubmitted(true);
+            setSelectedFile(null);
+            setDescription('');
+            setErrors({});
+
+            toast.success('Mandate processed successfully! Parameters extracted.');
+            ws.close();
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setApiError('WebSocket connection error');
+        setShowStreamingPanel(false);
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket closed');
+      };
+
     } catch (error) {
       console.error('Error submitting fund mandate:', error);
       const message = (error as any)?.message || 'Failed to submit fund mandate. Please try again.';
       setApiError(message);
-      alert(message);
-    } finally {
+      setShowStreamingPanel(false);
       setIsSubmitting(false);
+      alert(message);
     }
   };
 
   const getMandatoryThresholds = () => {
-    // Check multiple possible paths for sourcing_parameters
-    const thresholds = 
-      parsedResult?.criteria?.mandate?.sourcing_parameters ??
-      parsedResult?.criteria?.fund_mandate?.sourcing_parameters ??
-      parsedResult?.criteria?.sourcing_parameters ??
-      parsedResult?.sourcing_parameters ??
-      null;
-    
+    // Extract from new criteria structure: criteria.mandate.sourcing_parameters
+    const thresholds = parsedResult?.criteria?.mandate?.sourcing_parameters ?? null;
+
     if (!thresholds) {
       return [];
     }
 
     return Object.entries(thresholds).map(([key, value]) => ({
-      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
+      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
       value: value as string
     }));
   };
 
   const getPreferredMetrics = () => {
-    // Check multiple possible paths for screening_parameters
-    const metrics = 
-      parsedResult?.criteria?.mandate?.screening_parameters ??
-      parsedResult?.criteria?.fund_mandate?.screening_parameters ??
-      parsedResult?.criteria?.screening_parameters ??
-      parsedResult?.screening_parameters ??
-      null;
-    
+    // Extract from new criteria structure: criteria.mandate.screening_parameters
+    const metrics = parsedResult?.criteria?.mandate?.screening_parameters ?? null;
+
     if (!metrics) {
       return [];
     }
 
     return Object.entries(metrics).map(([key, value]) => ({
-      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
+      key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
       value: value as string
     }));
   };
 
   const getRiskFactors = () => {
-    // Check multiple possible paths for risk_parameters and risk_analysis_parameters
-    const factors = 
-      parsedResult?.criteria?.mandate?.risk_parameters ??
-      parsedResult?.criteria?.fund_mandate?.risk_parameters ??
-      parsedResult?.criteria?.risk_parameters ??
-      parsedResult?.criteria?.risk_parameters ??
-      parsedResult?.risk_parameters ??
-      parsedResult?.risk_parameters ??
-      null;
-    
+    // Extract from new criteria structure: criteria.mandate.risk_parameters
+    const factors = parsedResult?.criteria?.mandate?.risk_parameters ?? null;
+
     if (!factors) {
       return [];
     }
@@ -224,42 +270,48 @@ const FundMandate: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto">
-        <div className="flex flex-col md:flex-row gap-8 px-8 py-8">
-          {/* Left: Info Card */}
-          <div className="flex flex-col gap-3 md:w-1/3">
-            <div className="p-4 border border-indigo-200 rounded-xl bg-gradient-to-br from-indigo-50 via-white to-indigo-50/50 shadow-sm hover:shadow-md transition-all duration-300">
-              <div className="flex items-start mb-3">
-                <div className="p-2 bg-indigo-100 rounded-xl mr-3 shadow-sm">
-                  <FiFile className="w-5 h-5 text-indigo-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-1">Fund Mandate PDF</h3>
-                  <p className="text-sm text-indigo-600 font-medium">Document Upload</p>
-                </div>
-              </div>
+        <div className="flex flex-col gap-8 px-8 py-8">
+          {/* Form Section */}
+          <div className={`flex ${isSubmitting ? 'flex-row' : 'flex-col md:flex-row'} gap-8`}>
+            {/* Left: Info Card (hide after upload) */}
+            {!isSubmitting && !isSubmitted && (
+              <div className="flex flex-col gap-3 md:w-1/3">
+                <div className="p-4 border border-indigo-200 rounded-xl bg-gradient-to-br from-indigo-50 via-white to-indigo-50/50 shadow-sm hover:shadow-md transition-all duration-300">
+                  <div className="flex items-start mb-3">
+                    <div className="p-2 bg-indigo-100 rounded-xl mr-3 shadow-sm">
+                      <FiFile className="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900 mb-1">Fund Mandate PDF</h3>
+                      <p className="text-sm text-indigo-600 font-medium">Document Upload</p>
+                    </div>
+                  </div>
 
-              <p className="text-gray-600 text-sm leading-relaxed mb-3">
-                Upload your fund mandate documents in PDF format. Fund mandate document contains set of rules and guidelines that defines how a fund must be managed.
-              </p>
+                  <p className="text-gray-600 text-sm leading-relaxed mb-3">
+                    Upload your fund mandate documents in PDF format. Fund mandate document contains set of rules and guidelines that defines how a fund must be managed.
+                  </p>
 
-              <div className="bg-white/70 rounded-lg p-3 border border-indigo-100 mb-3">
-                <div className="flex items-center mb-2">
-                  
-                  <p className="text-sm font-semibold text-gray-800">Requirements</p>
-                </div>
-                <div className="space-y-1 text-sm text-gray-600">
-                  <div className="flex items-center">
-                    <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full mr-3 flex-shrink-0"></span>
-                    <span>PDF files only</span>
+                  <div className="bg-white/70 rounded-lg p-3 border border-indigo-100 mb-3">
+                    <div className="flex items-center mb-2">
+
+                      <p className="text-sm font-semibold text-gray-800">Requirements</p>
+                    </div>
+                    <div className="space-y-1 text-sm text-gray-600">
+                      <div className="flex items-center">
+                        <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full mr-3 flex-shrink-0"></span>
+                        <span>PDF files only</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+            )}
 
-          {/* Right: Upload Form */}
-          <div className="flex-1 max-w-2xl">
-            <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Right: Upload Form + Streaming Panel (full width after upload) */}
+            <div className={`flex gap-8 ${isSubmitting ? 'w-full' : 'flex-1'}`}>
+              {/* Form */}
+              <div className={`flex-1 ${isSubmitting ? 'max-w-full' : 'max-w-2xl'}`}>
+                <form onSubmit={handleSubmit} className="space-y-4">
               {/* PDF Upload Section */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -365,11 +417,86 @@ const FundMandate: React.FC = () => {
                 </button>
               </div>
             </form>
+              </div>
+
+              {/* Agent Thinking Container - Collapsible (Right Sidebar) */}
+              {(showStreamingPanel || streamingEvents.length > 0) && (
+                <div className={`transition-all duration-300 flex-shrink-0 ${agentThinkingOpen ? 'w-72' : 'w-10'}`}>
+                  <div className="flex flex-col bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden h-[calc(100vh-280px)] sticky top-4">
+                    {/* Header - Clickable to toggle with chevron */}
+                    <button
+                      onClick={() => setAgentThinkingOpen(!agentThinkingOpen)}
+                      className="px-3 py-3 border-b border-gray-200 bg-white flex items-center gap-2 flex-shrink-0 hover:bg-gray-50 transition-colors w-full text-left"
+                    >
+                      {agentThinkingOpen ? (
+                        <FiChevronRight className="w-4 h-4 text-gray-600 flex-shrink-0" />
+                      ) : (
+                        <FiChevronLeft className="w-4 h-4 text-gray-600 flex-shrink-0" />
+                      )}
+                      {agentThinkingOpen && (
+                        <>
+                          <FiMessageSquare className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                          <span className="text-sm font-semibold text-gray-900">Agent Thinking</span>
+                          <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full ml-auto">
+                            {streamingEvents.length} steps
+                          </span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Streaming Content */}
+                    {agentThinkingOpen && (
+                      <div
+                        ref={streamingPanelRef}
+                        className="flex-1 overflow-y-auto p-4 bg-white"
+                      >
+                        {streamingEvents.length === 0 ? (
+                          <div className="text-gray-400 text-sm">Waiting for agent output...</div>
+                        ) : (
+                          <div className="space-y-4">
+                            {streamingEvents.map((event, idx) => {
+                              const content = event.content || event.message || '';
+                              const cleanContent = typeof content === 'string'
+                                ? content
+                                    .replace(/^[^\w\s]*\s*/g, '')
+                                    .replace(/^STEP\s*\d+:\s*/i, '')
+                                    .replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]/gu, '')
+                                    .trim()
+                                : String(content);
+
+                              if (!cleanContent) return null;
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className="border-l-2 border-indigo-400 pl-4"
+                                >
+                                  <div className="text-xs text-gray-500 mb-1">Step {idx + 1}</div>
+                                  <p className="text-sm text-gray-800 leading-relaxed">{cleanContent}</p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Loading Indicator */}
+                    {showStreamingPanel && agentThinkingOpen && (
+                      <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 flex items-center gap-2 text-xs text-gray-600 flex-shrink-0">
+                        <div className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                        Processing...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Post-Submission Section */}
-        {isSubmitted && (
+        {(isSubmitting || isSubmitted) && (
           <div ref={extractedParamsRef} className="px-8 pb-16 animate-in fade-in slide-in-from-top-4 duration-500">
             <div className="max-w-4xl mx-auto space-y-10">
               {/* Introduction Header Area (De-contained) */}
@@ -386,6 +513,22 @@ const FundMandate: React.FC = () => {
                 </div>
               )}
 
+              {/* Loading Skeleton */}
+              {isSubmitting && !isSubmitted && (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="space-y-4">
+                      <Skeleton variant="text" width="30%" height={40} />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {[1, 2, 3].map((j) => (
+                          <Skeleton key={j} variant="rectangular" height={80} sx={{ borderRadius: 1 }} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* {parsedResult && (
                 <div className="p-4 bg-white border border-gray-100 rounded-lg mb-6">
                   <h3 className="text-lg font-semibold mb-2">Raw API Response (Debug)</h3>
@@ -394,7 +537,8 @@ const FundMandate: React.FC = () => {
               )} */}
 
               {/* Collapsible Sections (Fully naked/De-contained rows) */}
-              <div className="space-y-2">
+              {isSubmitted && (
+                <div className="space-y-2">
                 {/* 1. Sourcing Agent Parameters */}
                 <div className="transition-all duration-300">
                   <button
@@ -482,7 +626,8 @@ const FundMandate: React.FC = () => {
                   </button>
                 </div>
               </div>
-            </div>
+            )}
+          </div>
           </div>
         )}
       </div>

@@ -7,9 +7,9 @@ sys.path.insert(0, str(src_path))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from parsing_sourcing_routes import router as parsing_router
-from fundMandate import router as mandate_router
-from risk_api import router as risk_router
+from api.parsing_sourcing_routes import router as parsing_router
+from api.fundMandate import router as mandate_router
+from api.risk_api import router as risk_router
 
 from database.db import init_db, close_db
 
