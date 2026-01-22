@@ -1,19 +1,13 @@
 from langchain_classic.prompts import PromptTemplate
 from langchain_classic.agents import create_react_agent, AgentExecutor
-from langchain_groq import ChatGroq
-import os
 from dotenv import load_dotenv
 
 # from logging import setup_logging
-from tools import scan_mandate_folder_and_parse, extract_criteria
+from utils.tools import scan_mandate_folder_and_parse, extract_criteria
 
 load_dotenv()
 # setup_logging("parse_mandate")
 
-import sys
-import atexit
-from datetime import datetime
-from pathlib import Path
 # --- LOGGING SYSTEM (unchanged) ---
 # log_dir = Path("ParsingSourcingAgent_Log")
 # log_dir.mkdir(parents=True, exist_ok=True)
@@ -39,7 +33,7 @@ from pathlib import Path
 
 # LLM = ChatGroq(model="qwen/qwen3-32b", temperature=0, api_key=os.getenv("GROQ_API_KEY"))
 
-from llm_testing import get_langchain_llm
+from utils.llm_testing import get_langchain_llm
 
 LLM = get_langchain_llm()
 

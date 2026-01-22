@@ -3,7 +3,7 @@ import json
 import fitz
 from pathlib import Path
 from langchain_classic.tools import tool
-from llm import LLM
+from utils.llm import LLM
 
 @tool
 def scan_mandate_folder_and_parse() -> str:
@@ -96,7 +96,7 @@ def load_and_filter_companies(user_filters_json: str) -> str:
     """Load data/companies_list.json → Filter by user filters → JSON."""
     try:
         # 📁 Find data folder relative to THIS file (src/main.py)
-        data_dir = Path(__file__).parent.parent / "data"
+        data_dir = Path(__file__).parent.parent / "../data"
         companies_file = data_dir / "companies_list.json"
         
         # Verify file exists

@@ -1,108 +1,3 @@
-# from azure.ai.projects import AIProjectClient
-# from azure.identity import DefaultAzureCredential
-# from azure.ai.agents.models import ListSortOrder
-# from fastapi import APIRouter, HTTPException
-# from pydantic import BaseModel
-#
-#
-# PROJECT_ENDPOINT = "https://fstoaihub1292141971.services.ai.azure.com/api/projects/fstoaihub1292141971-AgentsSample"
-# AGENT_ID = "asst_Nm4bdHLpmI2W2VdwT2lF1Jr8"
-#
-#
-# class QueryRequest(BaseModel):
-#     content: str
-#
-#
-# class QueryResponse(BaseModel):
-#     response: str
-#     status: str
-#
-#
-# router = APIRouter()
-#
-#
-# def get_project_client():
-#     try:
-#         client = AIProjectClient(
-#             credential=DefaultAzureCredential(),
-#             endpoint=PROJECT_ENDPOINT
-#         )
-#         return client
-#     except Exception as e:
-#         print(f"Failed to initialize Azure AI Project Client: {e}")
-#         return None
-#
-#
-# def query_agent(user_content: str) -> dict:
-#     project = get_project_client()
-#
-#     if not project:
-#         return {
-#             "response": "Azure AI Project is not initialized",
-#             "status": "error"
-#         }
-#
-#     try:
-#         thread = project.agents.threads.create()
-#
-#         project.agents.messages.create(
-#             thread_id=thread.id,
-#             role="user",
-#             content=user_content
-#         )
-#
-#         run = project.agents.runs.create_and_process(
-#             thread_id=thread.id,
-#             agent_id=AGENT_ID
-#         )
-#
-#         if run.status == "failed":
-#             return {
-#                 "response": f"Agent run failed: {run.last_error}",
-#                 "status": "error"
-#             }
-#
-#         messages = project.agents.messages.list(
-#             thread_id=thread.id,
-#             order=ListSortOrder.ASCENDING
-#         )
-#
-#         agent_response = None
-#         for message in messages:
-#             if message.role == "assistant" and message.text_messages:
-#                 agent_response = message.text_messages[-1].text.value
-#
-#         if not agent_response:
-#             return {
-#                 "response": "No response from agent",
-#                 "status": "error"
-#             }
-#
-#         return {
-#             "response": agent_response,
-#             "status": "success"
-#         }
-#
-#     except Exception as e:
-#         return {
-#             "response": f"Error processing query: {str(e)}",
-#             "status": "error"
-#         }
-#
-#
-# @router.post("/chat", response_model=QueryResponse)
-# async def chat(request: QueryRequest) -> QueryResponse:
-#     """
-#     Send a query to the Azure agent and get a response
-#     """
-#     result = query_agent(request.content)
-#     return QueryResponse(
-#         response=result["response"],
-#         status=result["status"]
-#     )
-
-
-
 import json
 import traceback
 from typing import List, Dict, Any
@@ -110,12 +5,12 @@ from azure.ai.agents.models import ListSortOrder
 from datetime import datetime
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 # Import CrewAI components from mandate_screening
 try:
-    from mandate_screening import screening_crew
+    from agents.mandate_screening import screening_crew, run_screening_with_websocket
 except Exception as e:
     print(f"Error importing mandate_screening: {e}")
     screening_crew = None
@@ -288,10 +183,6 @@ async def screen_companies_endpoint(request: ScreeningRequest):
         # Execute CrewAI
         result = screening_crew.kickoff(inputs=inputs)
 
-        # print(f"\n{'─' * 80}")
-        # print(f"Raw Crew Output Type: {type(result)}")
-        # print(f"Raw Crew Output Preview: {str(result)[:500]}")
-        # print(f"{'─' * 80}\n")
         parsed_result = {
             "company_details": []
         }
@@ -338,3 +229,61 @@ async def screen_companies_endpoint(request: ScreeningRequest):
             status_code=500,
             detail=f"Screening failed: {str(e)}"
         )
+
+
+@router.websocket("/api/ws/screen")
+async def websocket_screen_companies(websocket: WebSocket):
+    """WebSocket endpoint for real-time company screening with streaming"""
+    await websocket.accept()
+
+    try:
+        print("\n" + "=" * 80)
+        print("🔴 WEBSOCKET CONNECTION ESTABLISHED")
+        print("=" * 80)
+
+        print("⏳ Waiting for client request...")
+        data = await websocket.receive_json()
+        mandate_parameters = data.get("mandate_parameters", {})
+        companies = data.get("companies", [])
+
+        print(f"\n✅ RECEIVED REQUEST FROM CLIENT:")
+        print(f"   - Mandate Parameters: {mandate_parameters}")
+        print(f"   - Companies: {len(companies)} companies\n")
+
+        if not mandate_parameters or not companies:
+            await websocket.send_json({
+                "type": "error",
+                "content": "Invalid request: mandate_parameters and companies are required"
+            })
+            await websocket.close(code=1008)
+            return
+
+        result = await run_screening_with_websocket(
+            websocket,
+            mandate_parameters,
+            companies
+        )
+
+        await websocket.send_json({
+            "type": "final_result",
+            "content": result
+        })
+
+        print("✅ WEBSOCKET SESSION COMPLETED SUCCESSFULLY\n")
+
+    except WebSocketDisconnect:
+        print("❌ WebSocket client disconnected")
+    except Exception as e:
+        print(f"❌ WebSocket error: {str(e)}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "content": f"Server error: {str(e)}"
+            })
+        except:
+            pass
+        finally:
+            try:
+                await websocket.close(code=1011)
+            except:
+                pass
