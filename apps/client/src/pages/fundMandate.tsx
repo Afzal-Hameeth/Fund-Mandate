@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API } from '../utils/constants';
-import { FiUpload, FiSend, FiFile, FiTrash, FiChevronDown, FiChevronUp, FiChevronLeft, FiChevronRight, FiMessageSquare } from 'react-icons/fi';
+import { FiUpload, FiSend, FiFile, FiTrash, FiChevronDown, FiChevronUp, FiChevronLeft, FiChevronRight, FiMessageSquare, FiX, FiChevronRight as FiArrowRight } from 'react-icons/fi';
 import { Skeleton } from '@mui/material';
 import toast from 'react-hot-toast';
 
@@ -24,6 +24,14 @@ const FundMandate: React.FC = () => {
   const [showStreamingPanel, setShowStreamingPanel] = useState(false);
   const [agentThinkingOpen, setAgentThinkingOpen] = useState(true);
   const [wsConnId, setWsConnId] = useState<string | null>(null);
+
+  // Capabilities modal state
+  const [showCapabilitiesModal, setShowCapabilitiesModal] = useState(false);
+  const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [capabilitiesResult, setCapabilitiesResult] = useState<any>(null);
+  const [pendingSubmitData, setPendingSubmitData] = useState<{ file: File; description: string } | null>(null);
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
 
   const extractedParamsRef = useRef<HTMLDivElement>(null);
   const streamingPanelRef = useRef<HTMLDivElement>(null);
@@ -111,6 +119,51 @@ const FundMandate: React.FC = () => {
       return;
     }
 
+    // Step 1: Show analyzing spinner for 3 seconds
+    setIsAnalyzing(true);
+    setPendingSubmitData({ file: selectedFile as File, description: description.trim() });
+
+    // Wait 3 seconds for the analyzing spinner
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    setIsAnalyzing(false);
+
+    // Step 2: Fetch capabilities with GET request
+    setCapabilitiesLoading(true);
+    setCapabilitiesResult(null);
+
+    try {
+      const capabilitiesUrl = API.makeResearchUrl(API.ENDPOINTS.CAPABILITIES.BASE_URL());
+      console.log('Fetching capabilities from:', capabilitiesUrl);
+      
+      const response = await fetch(capabilitiesUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Capabilities result:', data);
+      setCapabilitiesResult(data);
+      setShowCapabilitiesModal(true);
+    } catch (error) {
+      console.error('Error fetching capabilities:', error);
+      const message = (error as any)?.message || 'Failed to fetch capabilities. Proceeding with normal flow.';
+      toast.error(message);
+      // Continue with normal flow even if capabilities call fails
+      proceedWithNormalFlow(selectedFile as File, description.trim());
+    } finally {
+      setCapabilitiesLoading(false);
+    }
+  };
+
+  const proceedWithNormalFlow = async (file: File, query: string) => {
+    setShowCapabilitiesModal(false);
     setIsSubmitting(true);
     setIsSubmitted(false);
     setParsedResult(null);
@@ -122,8 +175,8 @@ const FundMandate: React.FC = () => {
     try {
       // Step 1: Upload file to /api/parse-mandate-upload
       const formData = new FormData();
-      formData.append('file', selectedFile as File);
-      formData.append('query', description.trim());
+      formData.append('file', file);
+      formData.append('query', query);
 
       const uploadResponse = await fetch(API.makeUrl(API.ENDPOINTS.FUND_MANDATE.UPLOAD()), {
         method: 'POST',
@@ -139,8 +192,8 @@ const FundMandate: React.FC = () => {
       console.log('Upload response:', uploadData);
 
       // Extract filename and query from upload response
-      const filename = uploadData.filename || selectedFile.name;
-      const query = uploadData.query || description.trim();
+      const filename = uploadData.filename || file.name;
+      const queryData = uploadData.query || query;
       const connId = `mandate-${Date.now()}`;
 
       setWsConnId(connId);
@@ -154,7 +207,7 @@ const FundMandate: React.FC = () => {
       ws.onopen = () => {
         console.log('WebSocket connected');
         // Send pdf_name and query to server (server expects pdf_name, not filename)
-        ws.send(JSON.stringify({ pdf_name: filename, query }));
+        ws.send(JSON.stringify({ pdf_name: filename, query: queryData }));
       };
 
       ws.onmessage = (event) => {
@@ -248,10 +301,245 @@ const FundMandate: React.FC = () => {
     }));
   };
 
+  const toggleExpand = (key: string) => {
+    const newExpanded = new Set(expandedItems);
+    if (newExpanded.has(key)) {
+      newExpanded.delete(key);
+    } else {
+      newExpanded.add(key);
+    }
+    setExpandedItems(newExpanded);
+  };
+
+  // Hierarchical tree component
+  const HierarchicalTree = ({ data }: { data: any }) => {
+    if (!Array.isArray(data) || data.length === 0) {
+      return <div className="text-gray-500 text-sm">No capabilities found</div>;
+    }
+
+    return (
+      <div className="space-y-1">
+        {data.map((capability: any) => (
+          <div key={capability.id}>
+            {/* Capability Level */}
+            <button
+              onClick={() => toggleExpand(`cap-${capability.id}`)}
+              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-lg transition-colors text-left group"
+            >
+              <div className="flex-shrink-0 w-5">
+                {expandedItems.has(`cap-${capability.id}`) ? (
+                  <FiChevronDown className="w-4 h-4 text-indigo-600" />
+                ) : (
+                  <FiArrowRight className="w-4 h-4 text-gray-400" />
+                )}
+              </div>
+              <span className="font-semibold text-gray-900 text-sm">{capability.name}</span>
+              {capability.vertical && (
+                <span className="text-xs text-gray-500 ml-auto">{capability.vertical}</span>
+              )}
+            </button>
+
+            {/* Processes */}
+            {expandedItems.has(`cap-${capability.id}`) && capability.processes && (
+              <div className="ml-4 border-l border-gray-200 pl-2">
+                {capability.processes.map((process: any) => (
+                  <div key={process.id}>
+                    <button
+                      onClick={() => toggleExpand(`proc-${process.id}`)}
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-lg transition-colors text-left group"
+                    >
+                      <div className="flex-shrink-0 w-5">
+                        {expandedItems.has(`proc-${process.id}`) ? (
+                          <FiChevronDown className="w-4 h-4 text-indigo-600" />
+                        ) : (
+                          <FiArrowRight className="w-4 h-4 text-gray-400" />
+                        )}
+                      </div>
+                      <span className="font-medium text-gray-800 text-sm">{process.name}</span>
+                      {process.level && (
+                        <span className="text-xs text-gray-500 ml-auto bg-gray-100 px-2 py-0.5 rounded">{process.level}</span>
+                      )}
+                    </button>
+
+                    {/* Subprocesses */}
+                    {expandedItems.has(`proc-${process.id}`) && process.subprocesses && (
+                      <div className="ml-4 border-l border-gray-200 pl-2">
+                        {process.subprocesses.map((subprocess: any) => (
+                          <div key={subprocess.id}>
+                            <button
+                              onClick={() => toggleExpand(`subproc-${subprocess.id}`)}
+                              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-lg transition-colors text-left group"
+                            >
+                              <div className="flex-shrink-0 w-5">
+                                {subprocess.data_entities && subprocess.data_entities.length > 0 ? (
+                                  expandedItems.has(`subproc-${subprocess.id}`) ? (
+                                    <FiChevronDown className="w-4 h-4 text-indigo-600" />
+                                  ) : (
+                                    <FiArrowRight className="w-4 h-4 text-gray-400" />
+                                  )
+                                ) : (
+                                  <div className="w-4" />
+                                )}
+                              </div>
+                              <span className="text-gray-700 text-sm">{subprocess.name}</span>
+                              {subprocess.category && (
+                                <span className="text-xs text-gray-500 ml-auto bg-gray-100 px-2 py-0.5 rounded">{subprocess.category}</span>
+                              )}
+                            </button>
+
+                            {/* Data Entities */}
+                            {expandedItems.has(`subproc-${subprocess.id}`) && subprocess.data_entities && (
+                              <div className="ml-4 border-l border-gray-200 pl-2">
+                                {subprocess.data_entities.map((dataEntity: any) => (
+                                  <div key={dataEntity.data_entity_id}>
+                                    <button
+                                      onClick={() => toggleExpand(`entity-${dataEntity.data_entity_id}`)}
+                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-lg transition-colors text-left group"
+                                    >
+                                      <div className="flex-shrink-0 w-5">
+                                        {dataEntity.data_elements && dataEntity.data_elements.length > 0 ? (
+                                          expandedItems.has(`entity-${dataEntity.data_entity_id}`) ? (
+                                            <FiChevronDown className="w-4 h-4 text-indigo-600" />
+                                          ) : (
+                                            <FiArrowRight className="w-4 h-4 text-gray-400" />
+                                          )
+                                        ) : (
+                                          <div className="w-4" />
+                                        )}
+                                      </div>
+                                      <span className="text-gray-700 text-sm">{dataEntity.data_entity_name}</span>
+                                      {dataEntity.data_elements && (
+                                        <span className="text-xs text-gray-500 ml-auto bg-gray-100 px-2 py-0.5 rounded">
+                                          {dataEntity.data_elements.length} items
+                                        </span>
+                                      )}
+                                    </button>
+
+                                    {/* Data Elements */}
+                                    {expandedItems.has(`entity-${dataEntity.data_entity_id}`) && dataEntity.data_elements && (
+                                      <div className="ml-4 border-l border-gray-200 pl-2">
+                                        {dataEntity.data_elements.map((dataElement: any) => (
+                                          <div
+                                            key={dataElement.data_element_id}
+                                            className="flex items-center gap-2 px-3 py-2 text-left group hover:bg-gray-100 rounded-lg transition-colors"
+                                          >
+                                            <div className="flex-shrink-0 w-5 flex items-center justify-center">
+                                              <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
+                                            </div>
+                                            <span className="text-gray-600 text-sm">{dataElement.data_element_name}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const canSubmit = !isSubmitting && selectedFile && description.trim() && !errors.file && !errors.description;
+
+  // Analyzing Overlay Component
+  const AnalyzingOverlay = () => (
+    <>
+      {isAnalyzing && (
+        <div className="fixed inset-0 flex items-center justify-center z-[999]">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md z-[999] overflow-hidden flex flex-col items-center justify-center p-8">
+            <div className="animate-spin mb-6">
+              <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full" />
+            </div>
+            <p className="text-gray-700 font-medium text-center">User intent is getting analyzed by Capability Compass</p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  // Capabilities Modal
+  const CapabilitiesModal = () => (
+    <>
+      {/* Capabilities Modal */}
+      {showCapabilitiesModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-[999]">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !capabilitiesLoading && setShowCapabilitiesModal(false)} />
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl z-[999] h-[50vh] overflow-hidden flex flex-col max-h-[80vh]">
+            {/* Modal Header */}
+            <div className="border-b border-gray-100 px-6 py-3 bg-gray-50 flex items-center gap-3">
+              <h2 className="text-lg font-bold text-gray-900">Capabilities Analysis Results</h2>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {capabilitiesLoading ? (
+                <div className="flex flex-col items-center justify-center h-40">
+                  <div className="animate-spin mb-4">
+                    <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full" />
+                  </div>
+                  <p className="text-gray-600 text-sm">Fetching capabilities...</p>
+                </div>
+              ) : capabilitiesResult ? (
+                <div>
+                  {Array.isArray(capabilitiesResult) ? (
+                    <HierarchicalTree data={capabilitiesResult} />
+                  ) : typeof capabilitiesResult === 'object' ? (
+                    <HierarchicalTree data={[capabilitiesResult]} />
+                  ) : (
+                    <div className="text-gray-500 text-sm">Unable to parse capabilities data</div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-32 text-gray-500">
+                  <p>No results to display</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="border-t border-gray-100 px-6 py-3 bg-gray-50 flex items-center gap-3 flex-shrink-0">
+              <button
+                onClick={() => setShowCapabilitiesModal(false)}
+                disabled={capabilitiesLoading}
+                className="flex-1 px-3 py-1.5 rounded-md text-gray-600 hover:bg-gray-100 font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (pendingSubmitData) {
+                    proceedWithNormalFlow(pendingSubmitData.file, pendingSubmitData.description);
+                  }
+                }}
+                disabled={capabilitiesLoading}
+                className="flex-1 px-4 py-1.5 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 
   return (
     <div className="flex flex-col min-h-full bg-gray-50">
+      {/* Analyzing Overlay */}
+      <AnalyzingOverlay />
+      {/* Capabilities Modal */}
+      <CapabilitiesModal />
       {/* Header */}
       <header className="border-b sticky top-0 bg-background/95 bg-white z-50">
         <div className="container mx-auto px-6 py-4">
@@ -374,13 +662,13 @@ const FundMandate: React.FC = () => {
               {/* Description Section */}
               <div>
                 <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
-                  Description
+                  User Intent
                 </label>
                 <textarea
                   id="description"
                   value={description}
                   onChange={handleDescriptionChange}
-                  placeholder="Provide a detailed description of this fund mandate, including objectives, requirements, and any specific instructions..."
+                  placeholder="Provide a detailed user intent of this fund mandate, including objectives, requirements, and any specific instructions..."
                   className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[80px] text-sm"
                   disabled={isSubmitting}
                   required
@@ -437,9 +725,6 @@ const FundMandate: React.FC = () => {
                         <>
                           <FiMessageSquare className="w-4 h-4 text-indigo-600 flex-shrink-0" />
                           <span className="text-sm font-semibold text-gray-900">Agent Thinking</span>
-                          <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full ml-auto">
-                            {streamingEvents.length} steps
-                          </span>
                         </>
                       )}
                     </button>
@@ -456,6 +741,7 @@ const FundMandate: React.FC = () => {
                           <div className="space-y-4">
                             {streamingEvents.map((event, idx) => {
                               const content = event.content || event.message || '';
+                              const eventType = event.type || `Event ${idx + 1}`;
                               const cleanContent = typeof content === 'string'
                                 ? content
                                     .replace(/^[^\w\s]*\s*/g, '')
@@ -471,7 +757,7 @@ const FundMandate: React.FC = () => {
                                   key={idx}
                                   className="border-l-2 border-indigo-400 pl-4"
                                 >
-                                  <div className="text-xs text-gray-500 mb-1">Step {idx + 1}</div>
+                                  <div className="text-xs text-gray-500 mb-1 font-medium capitalize">{eventType}</div>
                                   <p className="text-sm text-gray-800 leading-relaxed">{cleanContent}</p>
                                 </div>
                               );
@@ -546,7 +832,7 @@ const FundMandate: React.FC = () => {
                     className="w-full flex items-center gap-4 py-5 text-left border-b border-gray-100 hover:border-indigo-100 group transition-all"
                   >
                     {openSections.sourcing ? <FiChevronUp className="text-indigo-600 flex-shrink-0" /> : <FiChevronDown className="text-gray-300 group-hover:text-gray-400 flex-shrink-0" />}
-                    <span className="font-bold text-gray-800 tracking-tight">Mandatory Thresholds (Sourcing)</span>
+                    <span className="font-bold text-gray-800 tracking-tight">Sector & Industry Research</span>
                   </button>
                   {openSections.sourcing && (
                     <div className="py-6 animate-in fade-in slide-in-from-top-1 duration-300">
@@ -572,7 +858,7 @@ const FundMandate: React.FC = () => {
                     className="w-full flex items-center gap-4 py-5 text-left border-b border-gray-100 hover:border-indigo-100 group transition-all"
                   >
                     {openSections.screening ? <FiChevronUp className="text-indigo-600 flex-shrink-0" /> : <FiChevronDown className="text-gray-300 group-hover:text-gray-400 flex-shrink-0" />}
-                    <span className="font-bold text-gray-800 tracking-tight">Preferred Metrics (Screening)</span>
+                    <span className="font-bold text-gray-800 tracking-tight">Bottom-Up Fundamental Analysis</span>
                   </button>
                   {openSections.screening && (
                     <div className="py-6 animate-in fade-in slide-in-from-top-1 duration-300">
@@ -598,7 +884,7 @@ const FundMandate: React.FC = () => {
                     className="w-full flex items-center gap-4 py-5 text-left border-b border-gray-100 hover:border-indigo-100 group transition-all"
                   >
                     {openSections.risk ? <FiChevronUp className="text-indigo-600 flex-shrink-0" /> : <FiChevronDown className="text-gray-300 group-hover:text-gray-400 flex-shrink-0" />}
-                    <span className="font-bold text-gray-800 tracking-tight">Risk Factors (Risk Analysis)</span>
+                    <span className="font-bold text-gray-800 tracking-tight">Risk Assessment of Investment Ideas</span>
                   </button>
                   {openSections.risk && (
                     <div className="py-6 animate-in fade-in slide-in-from-top-1 duration-300">

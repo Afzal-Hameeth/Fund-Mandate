@@ -208,13 +208,13 @@ def analyze_company_risks(company_name: str, company_risks: str, mandate_risks: 
 
     Task:
     1. For EACH risk category in the MANDATE REQUIREMENTS (and ONLY those):
-       - Check if company's risk matches the mandate requirement
+       - Check if company's risk doesnt affect the mandate requirement
        - Assess if company meets the requirement (SAFE) or fails it (UNSAFE)
-       - Provide a crisp, short reason (1 sentence max, 10-15 words)
+       - Provide a crisp, short reason (1 sentence max, 40-50 words)
 
     2. Then provide OVERALL assessment:
        - Overall status: SAFE (all mandate categories pass) or UNSAFE (any mandate category fails)
-       - Overall reason: One catchy, compelling sentence (15-20 words)
+       - Overall reason: One catchy, compelling sentence (40-50 words)
        - Only consider MANDATE parameters in this assessment
 
     IMPORTANT: Ignore any company risk categories not in the mandate.
@@ -225,15 +225,15 @@ def analyze_company_risks(company_name: str, company_risks: str, mandate_risks: 
         "parameter_analysis": {{
             "Category_Name_1": {{
                 "status": "SAFE or UNSAFE",
-                "reason": "Crisp reason why (max 15 words)"
+                "reason": "Crisp reason why (max 40 words)"
             }},
             "Category_Name_2": {{
                 "status": "SAFE or UNSAFE",
-                "reason": "Crisp reason why (max 15 words)"
+                "reason": "Crisp reason why (max 40 words)"
             }}
         }},
         "overall_status": "SAFE or UNSAFE",
-        "overall_reason": "One catchy sentence explaining overall verdict (15-20 words)"
+        "overall_reason": "One catchy sentence explaining overall verdict (40-50 words)"
     }}
     """)
 
@@ -311,7 +311,9 @@ def create_risk_assessment_agent(event_queue=None):
 
     # Create agent prompt with required variables
     agent_prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are a financial risk assessment agent. Your task is to analyze companies against fund mandate requirements.
+        ("system", """This agent manages the Risk Assessment of Investment Ideas sub-process within the Research and Idea Generation process for the Fund Mandate capability. 
+        It identifies and quantifies potential downsides, including liquidity risk, volatility, and alignment with mandate-specific risk constraints. 
+        Trigger this agent to vet proposed investment ideas against risk frameworks before they are finalized in the idea generation phase.
 
 Use the analyze_company_risks tool to evaluate each company.
 Provide the tool with the company name, company risks JSON, and mandate requirements JSON."""),
@@ -365,7 +367,7 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
     if event_queue:
         event_queue.put({
             "type": "session_start",
-            "message": f"🚀 Starting analysis for {len(companies)} companies...",
+            "message": f" Starting Risk Assessment of Investment Ideas for {len(companies)} companies...",
             "companies_count": len(companies)
         })
 
@@ -392,7 +394,7 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
                 event_queue.put({
                     "type": "analysis_start",
                     "company": company_name,
-                    "message": f"🔍 Analyzing {company_name}...",
+                    "message": f" Analyzing {company_name}...",
                     "timestamp": __import__("datetime").datetime.now().isoformat()
                 })
 
@@ -415,7 +417,7 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
                 event_queue.put({
                     "type": "llm_thinking",
                     "company": company_name,
-                    "message": f"🧠 LLM analyzing risks for {company_name}...",
+                    "message": f" LLM analyzing risks for {company_name}...",
                     "timestamp": __import__("datetime").datetime.now().isoformat()
                 })
 
@@ -450,7 +452,7 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
                         "overall_status": result['overall_status'],
                         "overall_reason": result.get('overall_reason', ''),
                         "parameter_analysis": result.get('parameter_analysis', {}),
-                        "message": f"✅ Analysis complete for {result['company_name']}",
+                        "message": f"Risk Assessment of Investment Ideas Analysis complete for {result['company_name']}",
                         "timestamp": __import__("datetime").datetime.now().isoformat()
                     })
                     print(f"   → Overall: {result.get('overall_reason', '')}")
@@ -459,7 +461,7 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
                 raise ValueError("Tool did not produce JSON output")
 
         except Exception as e:
-            print(f"❌ Error processing {company_name}: {str(e)}")
+            print(f" Error processing {company_name}: {str(e)}")
             all_results.append({
                 "company_name": company_name,
                 "overall_status": "UNSAFE",
@@ -473,7 +475,7 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
         event_queue.put({
             "type": "session_complete",
             "status": "success",
-            "message": f"✅ Analysis completed for {len(all_results)} companies",
+            "message": f"Risk Assessment of Investment Ideas completed for {len(all_results)} companies",
             "results": all_results,
             "timestamp": __import__("datetime").datetime.now().isoformat()
         })

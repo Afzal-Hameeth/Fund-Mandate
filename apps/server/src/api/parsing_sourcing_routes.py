@@ -79,7 +79,7 @@ class BlockStreamingCallback(BaseCallbackHandler):
         self.event_queue.put({
             "type": "tool_start",
             "tool": serialized.get("name", "unknown"),
-            "message": f"🔧 Executing: {serialized.get('name', 'unknown')}",
+            "message": f"Executing: {serialized.get('name', 'unknown')}",
             "timestamp": datetime.now().isoformat()
         })
 
@@ -125,7 +125,7 @@ async def parse_mandate_upload(file: UploadFile = File(...), query: str = "Gener
             "status": "success",
             "filename": file.filename,
             "query": query,
-            "message": f"✅ File received: {file.filename}"
+            "message": f"File received: {file.filename}"
         }
 
     except Exception as e:
@@ -161,7 +161,7 @@ async def upload_mandate(file: UploadFile = File(...)):
             "status": "success",
             "filename": file.filename,
             "path": str(file_path),
-            "message": f"✅ File saved: {file.filename}"
+            "message": f"File saved: {file.filename}"
         }
 
     except Exception as e:
@@ -191,7 +191,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
         # Session start
         event_queue.put({
             "type": "session_start",
-            "message": "🚀 Starting PDF mandate parsing (Option 2: REST Upload)...",
+            "message": "Mandate Parsing Agent initialized",
             "session_id": session_id,
             "timestamp": datetime.now().isoformat()
         })
@@ -217,7 +217,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
         if not pdf_name:
             event_queue.put({
                 "type": "error",
-                "message": "❌ Missing 'pdf_name'",
+                "message": "Missing 'pdf_name'",
                 "timestamp": datetime.now().isoformat()
             })
             event_queue.put(None)
@@ -231,7 +231,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
         if not pdf_path.exists():
             event_queue.put({
                 "type": "error",
-                "message": f"❌ PDF not found: {pdf_name}",
+                "message": f"File not found: {pdf_name}",
                 "timestamp": datetime.now().isoformat()
             })
             event_queue.put(None)
@@ -240,14 +240,14 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
 
         event_queue.put({
             "type": "analysis_start",
-            "message": f"✅ Found PDF: {pdf_name}",
+            "message": f"File loaded: {pdf_name}",
             "pdf_path": str(pdf_path),
             "timestamp": datetime.now().isoformat()
         })
 
         event_queue.put({
             "type": "llm_thinking",
-            "message": "🧠 Agent analyzing PDF and extracting mandate criteria...",
+            "message": "Mandate Parsing Agent is analyzing your fund mandate...",
             "timestamp": datetime.now().isoformat()
         })
 
@@ -281,7 +281,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
                 "type": "analysis_complete",
                 "status": "success",
                 "criteria": criteria,
-                "message": "✅ Mandate parsing complete!",
+                "message": "Mandate Parsing Agent completed analysis!",
                 "timestamp": datetime.now().isoformat()
             })
 
@@ -291,7 +291,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
                 "type": "analysis_complete",
                 "status": "error",
                 "error": str(e),
-                "message": f"❌ Parsing failed: {str(e)}",
+                "message": f"Mandate Parsing Agent failed: {str(e)}",
                 "timestamp": datetime.now().isoformat()
             })
             print(f"Error: {traceback.format_exc()}")
@@ -300,7 +300,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
         event_queue.put({
             "type": "session_complete",
             "status": "success",
-            "message": "🎯 Session finished!",
+            "message": "Mandate Parsing Agent session finished!",
             "timestamp": datetime.now().isoformat()
         })
         event_queue.put(None)
@@ -351,7 +351,7 @@ async def ws_filter_companies(websocket: WebSocket, session_id: str):
         # Session start
         event_queue.put({
             "type": "session_start",
-            "message": "🚀 Starting company filtering (Block Streaming)...",
+            "message": "Sector & Industry Research Agent is initialized",
             "session_id": session_id,
             "timestamp": datetime.now().isoformat()
         })
@@ -376,7 +376,7 @@ async def ws_filter_companies(websocket: WebSocket, session_id: str):
         if not user_filters:
             event_queue.put({
                 "type": "error",
-                "message": "❌ Filter data is required",
+                "message": "Filter data is required",
                 "timestamp": datetime.now().isoformat()
             })
             event_queue.put(None)
@@ -386,14 +386,14 @@ async def ws_filter_companies(websocket: WebSocket, session_id: str):
         # Session info
         event_queue.put({
             "type": "analysis_start",
-            "message": "🔍 Analyzing filters and matching companies...",
+            "message": "Filters received and validated",
             "filter_count": len(user_filters),
             "timestamp": datetime.now().isoformat()
         })
 
         event_queue.put({
             "type": "llm_thinking",
-            "message": "🧠 Agent matching companies to your criteria...",
+            "message": "Sector & Industry Research Agent is processing your filters...",
             "timestamp": datetime.now().isoformat()
         })
 
@@ -432,7 +432,7 @@ async def ws_filter_companies(websocket: WebSocket, session_id: str):
                 "companies_count": len(companies.get("qualified", [])) if isinstance(companies, dict) else 0,
                 "companies": [c.get("Company ") for c in companies.get("qualified", [])] if isinstance(companies,
                                                                                                        dict) else [],
-                "message": f"✅ Agent found {len(companies.get('qualified', []))} matches!",
+                "message": f"Sector & Industry Research Agent found {len(companies.get('qualified', []))} matches!",
                 "timestamp": datetime.now().isoformat()
             })
 
@@ -442,7 +442,7 @@ async def ws_filter_companies(websocket: WebSocket, session_id: str):
                 "type": "analysis_complete",
                 "status": "error",
                 "error": str(e),
-                "message": f"❌ Filtering failed: {str(e)}",
+                "message": f"Sector & Industry Research Agent failed: {str(e)}",
                 "timestamp": datetime.now().isoformat()
             })
             print(f"Error in ws_filter_companies: {traceback.format_exc()}")
@@ -451,7 +451,7 @@ async def ws_filter_companies(websocket: WebSocket, session_id: str):
         event_queue.put({
             "type": "session_complete",
             "status": "success",
-            "message": "🎯 Company filtering finished!",
+            "message": "Sector & Industry Research Agent session finished!",
             "timestamp": datetime.now().isoformat()
         })
         event_queue.put(None)

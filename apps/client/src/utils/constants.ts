@@ -1,7 +1,9 @@
 export const API = {
     BASE_URL: () => 'http://localhost:8000',
+    RESEARCH_BASE_URL: () => 'http://10.4.16.28:8501',
     // Helper to build absolute HTTP URLs and websocket URLs
     makeUrl: (path: string) => `${API.BASE_URL()}${path}`,
+    makeResearchUrl: (path: string) => `${API.RESEARCH_BASE_URL()}${path}`,
     wsUrl: (path: string) => {
         const base = API.BASE_URL();
         const host = base.replace(/^https?:\/\//, '');
@@ -25,6 +27,12 @@ export const API = {
         RISK: {
             ANALYZE_CUSTOM: () => '/risk/analyze-custom',
             ANALYZE_STREAM: () => '/risk/analyze',
+        },
+        RESEARCH: {
+            CAPABILITIES: () => '/api/capabilities/research',
+        },
+        CAPABILITIES: {
+            BASE_URL: () => '/api/capabilities/1',
         },
     },
 };
