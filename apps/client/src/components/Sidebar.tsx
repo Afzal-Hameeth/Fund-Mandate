@@ -1,12 +1,11 @@
+
 import React, { useState } from 'react';
-import {useLocation, NavLink } from 'react-router-dom';
-import {FiLayers, FiChevronLeft, FiChevronRight, FiFileText, FiSearch } from 'react-icons/fi';
+import { useLocation, NavLink } from 'react-router-dom';
+import { FiLayers, FiChevronLeft, FiChevronRight, FiFileText, FiSearch } from 'react-icons/fi';
 
 const Sidebar: React.FC = () => {
- 
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
-
 
   const navItems = [
     { label: 'Agents', path: '/', icon: FiLayers },
@@ -16,13 +15,13 @@ const Sidebar: React.FC = () => {
 
   return (
     <aside
-      className={`bg-white border-r border-gray-200 transition-all duration-300 flex flex-col ${
+      className={`bg-white border-r border-gray-200 transition-all duration-300 flex flex-col overflow-x-hidden ${
         collapsed ? 'w-16' : 'w-64'
       }`}
     >
       {/* Header */}
       <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-        {!collapsed && <h2 className="font-bold text-lg text-gray-900">Agent Platform</h2>}
+        {!collapsed && <h2 className="font-bold text-lg text-gray-900">FundPilot</h2>}
         <button
           onClick={() => setCollapsed(!collapsed)}
           className="p-1 hover:bg-gray-100 rounded-md"
@@ -42,14 +41,17 @@ const Sidebar: React.FC = () => {
             <NavLink
               key={item.path}
               to={item.path}
-              className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+              className={`flex items-center ${
+                collapsed ? 'justify-center gap-0 px-0' : 'gap-3 px-3'
+              } py-2 rounded-md transition-colors ${
                 isActive
                   ? 'bg-indigo-100 text-indigo-700 font-medium'
                   : 'text-gray-700 hover:bg-gray-100'
               }`}
               title={collapsed ? item.label : ''}
             >
-              <Icon size={20} />
+              {/* Prevent icon from shrinking when sidebar is collapsed */}
+              <Icon size={20} className="shrink-0 w-5 h-5" />
               {!collapsed && <span className="text-sm">{item.label}</span>}
             </NavLink>
           );
