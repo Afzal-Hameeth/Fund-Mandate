@@ -208,7 +208,7 @@ const FundMandate: React.FC = () => {
 
   const getMandatoryThresholds = () => {
     // Extract from new criteria structure: criteria.mandate.sourcing_parameters
-    const thresholds = parsedResult?.criteria?.mandate?.sourcing_parameters ?? null;
+    const thresholds = parsedResult?.criteria?.mandate?.sourcing_parameters ?? parsedResult?.criteria?.sourcing_parameters ??null;
 
     if (!thresholds) {
       return [];
@@ -222,7 +222,7 @@ const FundMandate: React.FC = () => {
 
   const getPreferredMetrics = () => {
     // Extract from new criteria structure: criteria.mandate.screening_parameters
-    const metrics = parsedResult?.criteria?.mandate?.screening_parameters ?? null;
+    const metrics = parsedResult?.criteria?.mandate?.screening_parameters ?? parsedResult?.criteria?.screening_parameters ?? null;
 
     if (!metrics) {
       return [];
@@ -236,7 +236,7 @@ const FundMandate: React.FC = () => {
 
   const getRiskFactors = () => {
     // Extract from new criteria structure: criteria.mandate.risk_parameters
-    const factors = parsedResult?.criteria?.mandate?.risk_parameters ?? null;
+    const factors = parsedResult?.criteria?.mandate?.risk_parameters ?? parsedResult?.criteria?.risk_parameters ?? null;
 
     if (!factors) {
       return [];

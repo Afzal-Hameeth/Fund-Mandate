@@ -2,9 +2,6 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-src_path = Path(__file__).parent
-sys.path.insert(0, str(src_path))
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.parsing_sourcing_routes import router as parsing_router
