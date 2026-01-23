@@ -317,7 +317,7 @@ const SourcingAgent: React.FC = () => {
           if (content && typeof content === 'string') {
             // Clean up the content - remove emoji prefixes and step labels
             const cleanContent = content
-              .replace(/^[✅💭🔧⚙️✨📋⏳📊🤖]\s*/g, '')
+              .replace(/^[âœ…ðŸ’­ðŸ”§âš™ï¸âœ¨ðŸ“‹â³ðŸ“ŠðŸ¤–]\s*/g, '')
               .replace(/^STEP \d+:\s*/i, '')
               .trim();
             if (cleanContent) {
@@ -403,7 +403,7 @@ const SourcingAgent: React.FC = () => {
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        console.log('✅ WebSocket connected');
+        console.log('âœ… WebSocket connected');
         // Send the analysis request
         ws.send(JSON.stringify(payload));
       };
@@ -411,7 +411,7 @@ const SourcingAgent: React.FC = () => {
       ws.onmessage = (event) => {
         try {
           const eventData = JSON.parse(event.data);
-          console.log('📨 Received event:', eventData);
+          console.log('ðŸ“¨ Received event:', eventData);
 
           // Add event to streaming events
           setStreamingEvents((prev) => [...prev, eventData]);
@@ -467,12 +467,12 @@ const SourcingAgent: React.FC = () => {
       };
 
       ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
+        console.error('âŒ WebSocket error:', error);
         toast.error('WebSocket connection error');
       };
 
       ws.onclose = () => {
-        console.log('🔌 WebSocket closed');
+        console.log('ðŸ”Œ WebSocket closed');
         setIsSubmitting(false);
       };
     } catch (err) {
@@ -694,8 +694,7 @@ const SourcingAgent: React.FC = () => {
 
       case 1:
         return (
-          <div className="flex gap-6">
-            <div className="flex-1 space-y-4">
+          <div className="space-y-6">
               {filterResponse?.companies?.qualified ? (
                 <>
                   <div className="pb-4">
@@ -891,8 +890,6 @@ const SourcingAgent: React.FC = () => {
                   <p className="text-sm text-gray-600">Please complete Step 1 (Sourcing) first</p>
                 </div>
               )}
-            </div>
-
           </div>
         );
 
@@ -1227,7 +1224,7 @@ const SourcingAgent: React.FC = () => {
                         {isSubmitting ? (
                           <span>Analyzing...</span>
                         ) : riskAnalysisResponse ? (
-                          <span>✓ Analysis Complete</span>
+                          <span>âœ“ Analysis Complete</span>
                         ) : (
                           <span>Analyze Risk</span>
                         )}
@@ -1254,19 +1251,11 @@ const SourcingAgent: React.FC = () => {
                       <FiChevronRight className="w-4 h-4 text-indigo-600 flex-shrink-0" />
                       <FiMessageSquare className="w-4 h-4 text-indigo-600 flex-shrink-0" />
                       <span className="text-sm font-semibold text-gray-900">Agent Thinking</span>
-                      <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
-                        {streamingEvents.length} steps
-                      </span>
                     </>
                   ) : (
                     <>
                       <FiMessageSquare className="w-5 h-5 text-indigo-600" />
                       <FiChevronLeft className="w-4 h-4 text-indigo-600" />
-                      {streamingEvents.length > 0 && (
-                        <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">
-                          {streamingEvents.length}
-                        </span>
-                      )}
                     </>
                   )}
                 </button>
@@ -1283,6 +1272,7 @@ const SourcingAgent: React.FC = () => {
                       <div className="space-y-4">
                         {streamingEvents.map((event, idx) => {
                           const content = event.content || event.message || '';
+                          const eventType = event.type || `Event ${idx + 1}`;
                           const cleanContent = typeof content === 'string'
                             ? content
                                 .replace(/^[^\w\s]*\s*/g, '')
@@ -1298,7 +1288,7 @@ const SourcingAgent: React.FC = () => {
                               key={idx}
                               className="border-l-2 border-indigo-400 pl-4"
                             >
-                              <div className="text-xs text-gray-500 mb-1">Step {idx + 1}</div>
+                              <div className="text-xs text-gray-500 mb-1 font-medium capitalize">{eventType}</div>
                               <p className="text-sm text-gray-800 leading-relaxed">{cleanContent}</p>
                             </div>
                           );
