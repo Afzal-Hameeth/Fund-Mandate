@@ -1,244 +1,231 @@
 import json
-import os
-from dotenv import load_dotenv
+from datetime import datetime
 from typing import List, Dict, Any
-from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+from azure.keyvault.secrets import SecretClient
+from azure.identity import DefaultAzureCredential
 from langchain_openai import AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.tools import tool
 from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
 import re
-import sys
-from azure.keyvault.secrets import SecretClient
-from azure.identity import DefaultAzureCredential
 
 load_dotenv()
 
-# --- AZURE CONFIG ---
-OPENAI_API_VERSION = "2024-12-01-preview"
-AZURE_OPENAI_ENDPOINT = "https://stg-secureapi.hexaware.com/api/azureai"
-KEYVAULT_URI = "https://kvcapabilitycompass.vault.azure.net/"
-SECRET_NAME = "kvCapabilityCompassKeyLLM"
-DEPLOYMENT_NAME = "gpt-4o"
+KEYVAULT_URI = "https://fstodevazureopenai.vault.azure.net/"
+credential = DefaultAzureCredential()
+kvclient = SecretClient(vault_url=KEYVAULT_URI, credential=credential)
+
+# Retrieve Azure OpenAI configuration from Key Vault
+secrets_map = {}
+secret_names = ["llm-base-endpoint", "llm-mini", "llm-mini-version", "llm-api-key"]
+for secret_name in secret_names:
+    try:
+        secret = kvclient.get_secret(secret_name)
+        secrets_map[secret_name] = secret.value
+    except Exception as e:
+        print(f"Error retrieving secret '{secret_name}': {e}")
+        raise
+
+AZURE_OPENAI_ENDPOINT = secrets_map.get("llm-base-endpoint")
+DEPLOYMENT_NAME = secrets_map.get("llm-mini")
+OPENAI_API_VERSION = secrets_map.get("llm-mini-version")
+GPT5_API_KEY = secrets_map.get("llm-api-key")
 
 
-# === STREAMING TOKEN CALLBACK ===
+# ============================================================================
+# STREAMING CALLBACK FOR REAL-TIME LLM THINKING TOKENS
+# ============================================================================
+
 class StreamingTokenCallback(BaseCallbackHandler):
     """
-    Callback to capture LLM tokens and emit them as meaningful chunks.
-    Ensures tokens are only emitted when they form complete thoughts/sentences.
+    Captures LLM tokens and emits them as meaningful thought chunks.
+    Only emits complete thoughts/sentences to avoid fragmentary output.
     """
 
-    def __init__(self, event_queue=None):
+    def __init__(self, event_queue=None, company_name=None):
         self.buffer = ""
         self.event_queue = event_queue
         self.token_count = 0
-        # Semantic boundaries where we emit (complete thoughts)
+        self.company_name = company_name
         self.sentence_endings = {'.', '!', '?'}
         self.semantic_pauses = {',', ':', ';'}
 
     def is_meaningful_content(self, text: str) -> bool:
-        """Check if content is meaningful (not just noise or placeholders)"""
+        """Validates content is meaningful analysis, not noise or JSON structure"""
         if not text or not text.strip():
             return False
 
         # Filter out meaningless patterns
-        meaningless_patterns = [
-            '||empty||',
-            '....',
-            '----',
-            '====',
-            '****',
-            '||||',
-            '    ',  # Just spaces
-            '\n\n\n',  # Just newlines
-        ]
+        meaningless_patterns = ['||empty||', '....', '----', '====', '****', '||||', '    ', '\n\n\n']
 
         text_lower = text.lower()
         for pattern in meaningless_patterns:
             if pattern in text_lower:
                 return False
 
-        # Must have at least some alphabetic characters
+        # Filter out JSON structure (should be in analysis_complete event, not thinking)
+        json_char_count = sum(1 for c in text if c in '{}[]:,"')
+        total_chars = len(text.strip())
+        json_ratio = json_char_count / total_chars if total_chars > 0 else 0
+
+        if json_ratio > 0.3:
+            return False
+
+        if any(text.strip().startswith(indicator) for indicator in
+               ['{', '[', '"status', '"company_name', '"parameter']):
+            return False
+
         if not any(c.isalpha() for c in text):
             return False
 
         return True
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
-        """Capture tokens and emit only on semantic boundaries (complete thoughts)"""
+        """Buffers tokens and emits only when complete thoughts are formed"""
         self.buffer += token
         self.token_count += 1
 
-        # Check for sentence-ending punctuation (strongest signal for complete thought)
         has_sentence_ending = any(ending in self.buffer for ending in self.sentence_endings)
-
-        # Check for semantic pause followed by substantial content
         has_semantic_pause = any(pause in self.buffer for pause in self.semantic_pauses)
 
-        # Emit ONLY when we have meaningful, complete content
         should_emit = False
 
         if has_sentence_ending:
-            # Complete sentence - definitely emit
             should_emit = True
         elif has_semantic_pause and len(self.buffer.strip()) > 20:
-            # Meaningful pause with good chunk size
             should_emit = True
         elif self.token_count >= 50:
-            # Fallback: if buffer gets too large, emit to avoid memory issues
-            # But only if it has meaningful content (not just whitespace)
             if self.buffer.strip() and len(self.buffer.strip()) > 15:
                 should_emit = True
 
         if should_emit:
             content = self.buffer.strip()
-            # ✅ Only emit if content is meaningful (not noise/placeholders)
             if content and self.is_meaningful_content(content):
                 if self.event_queue:
-                    self.event_queue.put({
+                    thinking_event = {
                         "type": "thinking_token",
                         "content": content,
-                        "timestamp": __import__("datetime").datetime.now().isoformat()
-                    })
+                        "subprocess": "Risk Assessment of Investment Ideas",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    if self.company_name:
+                        thinking_event["company_name"] = self.company_name
+
+                    self.event_queue.put(thinking_event)
                 print(content, end="", flush=True)
             self.buffer = ""
             self.token_count = 0
 
     def on_llm_end(self, response, **kwargs) -> None:
-        """Flush any remaining meaningful content when LLM finishes"""
+        """Flushes remaining content when LLM completes"""
         content = self.buffer.strip()
-        # ✅ Only emit if content is meaningful (not noise/placeholders)
         if content and self.is_meaningful_content(content):
             if self.event_queue:
-                self.event_queue.put({
+                thinking_event = {
                     "type": "thinking_token",
                     "content": content,
-                    "timestamp": __import__("datetime").datetime.now().isoformat()
-                })
+                    "subprocess": "Risk Assessment of Investment Ideas",
+                    "timestamp": datetime.now().isoformat()
+                }
+                if self.company_name:
+                    thinking_event["company_name"] = self.company_name
+
+                self.event_queue.put(thinking_event)
             print(content, end="", flush=True)
         self.buffer = ""
         self.token_count = 0
 
 
-def get_azure_llm(event_queue=None):
-    """Initialize Azure OpenAI LLM with KeyVault authentication and streaming"""
+def get_azure_llm(event_queue=None, company_name=None):
+    """Initializes Azure OpenAI LLM with streaming enabled"""
     try:
-        credential = DefaultAzureCredential()
-        kvclient = SecretClient(vault_url=KEYVAULT_URI, credential=credential)
-        api_key = kvclient.get_secret(SECRET_NAME).value
         return AzureChatOpenAI(
             azure_deployment=DEPLOYMENT_NAME,
             openai_api_version=OPENAI_API_VERSION,
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
-            api_key=api_key,
-            temperature=0.0,  # ✅ Deterministic
-            streaming=True,  # ✅ Enable streaming
-            callbacks=[StreamingTokenCallback(event_queue=event_queue)]
+            api_key=GPT5_API_KEY,
+            temperature=1,
+            streaming=True,
+            callbacks=[StreamingTokenCallback(event_queue=event_queue, company_name=company_name)]
         )
     except Exception as e:
-        print(f"❌ Failed to initialize Azure LLM: {str(e)}")
+        print(f"Error initializing Azure LLM: {str(e)}")
         raise e
 
 llm = get_azure_llm()
 
 
-class RiskAssessment(BaseModel):
-    category: str = Field(description="Risk category name")
-    status: str = Field(description="Safe or Unsafe")
-    reason: str = Field(description="Explanation for the assessment")
-
-
-class CompanyRiskAnalysis(BaseModel):
-    company_name: str = Field(description="Name of the company")
-    overall_status: str = Field(description="Overall Safe or Unsafe")
-    risk_assessments: List[RiskAssessment] = Field(description="Individual risk category assessments")
-    recommendation: str = Field(description="Investment recommendation")
-
-
-# === GLOBAL VARIABLES FOR STREAMING ===
 tool_output_capture = {"last_json": None}
-stream_callback = None  # Function to call for streaming events
+event_queue_global = None
 
 
-def set_stream_callback(callback):
-    """Set the callback function for streaming events"""
-    global stream_callback
-    stream_callback = callback
+def set_event_queue_global(queue):
+    """Sets the global event queue for real-time streaming"""
+    global event_queue_global
+    event_queue_global = queue
 
 
-def emit_event(event_type: str, **kwargs):
-    """Emit a streaming event if callback is set"""
-    global stream_callback
-    if stream_callback:
-        event = {
-            "type": event_type,
-            "timestamp": __import__("datetime").datetime.now().isoformat(),
-            **kwargs
-        }
-        stream_callback(event)
-
-
-# === TOOLS FOR LANGCHAIN AGENT ===
+# ============================================================================
+# RISK ANALYSIS TOOL FOR LANGCHAIN AGENT
+# ============================================================================
 
 @tool
 def analyze_company_risks(company_name: str, company_risks: str, mandate_risks: str) -> str:
     """
-    Analyze company risks against mandate risk parameters.
-    Provides detailed analysis per parameter + overall verdict.
+    Analyzes company risks against mandate requirements.
+    Uses LLM to evaluate each risk parameter and provide overall investment verdict.
 
-    Args:
-        company_name: Name of the company
-        company_risks: JSON string of company risks
-        mandate_risks: JSON string of mandate risk parameters (variable categories)
-
-    Returns:
-        JSON string with per-parameter analysis + overall verdict
+    Returns JSON with per-parameter analysis and overall assessment.
     """
 
     prompt = ChatPromptTemplate.from_template("""
-    You are a financial risk analyst. Analyze the company risks against mandate requirements in detail.
+### System Role
 
-    CRITICAL: Analyze ONLY the parameters specified in MANDATE REQUIREMENTS, not all possible categories.
+You are a Senior Risk Analyst at a Tier-1 Private Equity firm. Your objective is a strict binary compliance check: Do the identified risks of a target company align with our specific Mandate Requirements?
 
-    COMPANY: {company_name}
-    COMPANY RISKS: {company_risks}
-    MANDATE REQUIREMENTS (analyze ONLY these): {mandate_risks}
+### Constraints
 
-    Task:
-    1. For EACH risk category in the MANDATE REQUIREMENTS (and ONLY those):
-       - Check if company's risk doesnt affect the mandate requirement
-       - Assess if company meets the requirement (SAFE) or fails it (UNSAFE)
-       - Provide a crisp, short reason (1 sentence max, 40-50 words)
+1. **Scope:** Evaluate ONLY the categories listed in MANDATE REQUIREMENTS.
 
-    2. Then provide OVERALL assessment:
-       - Overall status: SAFE (all mandate categories pass) or UNSAFE (any mandate category fails)
-       - Overall reason: One catchy, compelling sentence (40-50 words)
-       - Only consider MANDATE parameters in this assessment
+2. **Exclusion:** If a risk exists in the COMPANY RISKS but is NOT in the MANDATE REQUIREMENTS, ignore it entirely.
 
-    IMPORTANT: Ignore any company risk categories not in the mandate.
+3. **Binary Logic:** A parameter is SAFE only if the company risk profile meets or stays within the mandate threshold. Otherwise, it is UNSAFE.
 
-    Return ONLY valid JSON (no markdown, no explanation):
-    {{
-        "company_name": "{company_name}",
-        "parameter_analysis": {{
-            "Category_Name_1": {{
-                "status": "SAFE or UNSAFE",
-                "reason": "Crisp reason why (max 40 words)"
-            }},
-            "Category_Name_2": {{
-                "status": "SAFE or UNSAFE",
-                "reason": "Crisp reason why (max 40 words)"
-            }}
-        }},
-        "overall_status": "SAFE or UNSAFE",
-        "overall_reason": "One catchy sentence explaining overall verdict (40-50 words)"
+4. **Overall Logic:** The overall status is SAFE if and only if ALL evaluated parameters are SAFE. If one or more fail, the status is UNSAFE.
+
+### Inputs
+
+- **Target Company:** {company_name}
+
+- **Company Risk Profile:** {company_risks}
+
+- **Mandate Requirements:** {mandate_risks}
+
+### Output Instructions
+
+Return a strictly valid JSON object. Do not include markdown formatting, "```json" tags, or any conversational preamble.
+
+### JSON Schema
+
+{{
+    "company_name": "{company_name}",
+    "parameter_analysis": {{
+        "{{Category_Name}}": {{
+            "status": "SAFE | UNSAFE",
+            "reason": "Max 15 words explaining the specific alignment or breach."
+        }}
+    }},
+    "overall_assessment": {{
+        "status": "SAFE | UNSAFE",
+        "reason": "Max 20 words summarizing the investment viability based solely on the mandate."
     }}
+}}
     """)
 
     try:
-        llm_instance = get_azure_llm()
+        llm_instance = get_azure_llm(event_queue=event_queue_global, company_name=company_name)
 
         response = (prompt | llm_instance).invoke({
             "company_name": company_name,
@@ -246,14 +233,10 @@ def analyze_company_risks(company_name: str, company_risks: str, mandate_risks: 
             "mandate_risks": mandate_risks
         })
 
-        # Extract JSON from response
         response_text = response.content if hasattr(response, 'content') else str(response)
-
-        # Clean up markdown if present
         response_text = re.sub(r'```(?:json)?\s*\n?', '', response_text)
         response_text = response_text.strip()
 
-        # Find first { and last } to extract complete JSON
         start_idx = response_text.find('{')
         end_idx = response_text.rfind('}')
 
@@ -263,57 +246,53 @@ def analyze_company_risks(company_name: str, company_risks: str, mandate_risks: 
         else:
             result = json.loads(response_text)
 
-        # Validate required fields
-        required_fields = ['company_name', 'parameter_analysis', 'overall_status', 'overall_reason']
+        required_fields = ['company_name', 'parameter_analysis', 'overall_assessment']
         if not all(k in result for k in required_fields):
-            raise ValueError("Missing required fields")
+            raise ValueError("Missing required fields in response")
 
-        # FORCE COMPANY NAME FROM INPUT (not from LLM output)
-        # This ensures we always use the actual company name from JSON input
+        if not isinstance(result['overall_assessment'], dict):
+            raise ValueError("overall_assessment must be an object")
+        if 'status' not in result['overall_assessment'] or 'reason' not in result['overall_assessment']:
+            raise ValueError("overall_assessment must contain status and reason")
+
         result['company_name'] = company_name
+        result['overall_assessment']['status'] = result['overall_assessment']['status'].upper()
 
-        # Ensure status is uppercase
-        result['overall_status'] = result['overall_status'].upper()
-
-        # Ensure all parameter statuses are uppercase
         for param, analysis in result.get('parameter_analysis', {}).items():
             if 'status' in analysis:
                 analysis['status'] = analysis['status'].upper()
 
-        print(f"\n✅ Successfully analyzed {company_name}")
-        print(f"   JSON captured: {json.dumps(result, indent=2)}")
+        print(f"\nAnalysis complete for {company_name}")
+        print(f"Overall Status: {result['overall_assessment']['status']}")
 
-        # 🔥 CAPTURE THE JSON OUTPUT GLOBALLY 🔥
         tool_output_capture["last_json"] = result
-
         return json.dumps(result)
 
     except Exception as e:
-        print(f"❌ Error in analyze_company_risks: {str(e)}")
+        print(f"Error in analyze_company_risks: {str(e)}")
         result = {
             "company_name": company_name,
             "parameter_analysis": {},
-            "overall_status": "UNSAFE",
-            "overall_reason": "Analysis failed due to processing error"
+            "overall_assessment": {
+                "status": "UNSAFE",
+                "reason": "Analysis failed due to error"
+            }
         }
         tool_output_capture["last_json"] = result
         return json.dumps(result)
 
 
-# === AGENT SETUP ===
+# ============================================================================
+# LANGCHAIN AGENT SETUP
+# ============================================================================
+
 def create_risk_assessment_agent(event_queue=None):
-    """
-    Create a tool-calling agent for risk assessment.
-    Agent will use the analyze_company_risks tool to perform analysis.
-    """
-    # Define tools list
+    """Creates a tool-calling agent for risk assessment workflow"""
     tools = [analyze_company_risks]
 
-    # Create agent prompt with required variables
     agent_prompt = ChatPromptTemplate.from_messages([
-        ("system", """This agent manages the Risk Assessment of Investment Ideas sub-process within the Research and Idea Generation process for the Fund Mandate capability. 
-        It identifies and quantifies potential downsides, including liquidity risk, volatility, and alignment with mandate-specific risk constraints. 
-        Trigger this agent to vet proposed investment ideas against risk frameworks before they are finalized in the idea generation phase.
+        ("system", """Agent Name: risk_assessment_investment_ideas_agent
+Description: This agent manages the Risk Assessment of Investment Ideas sub-process within the Research and Idea Generation process for the Fund Mandate capability. It identifies and quantifies potential downsides, including liquidity risk, volatility, and alignment with mandate-specific risk constraints. Trigger this agent to vet proposed investment ideas against risk frameworks before they are finalized in the idea generation phase.
 
 Use the analyze_company_risks tool to evaluate each company.
 Provide the tool with the company name, company risks JSON, and mandate requirements JSON."""),
@@ -321,11 +300,9 @@ Provide the tool with the company name, company risks JSON, and mandate requirem
         ("assistant", "{agent_scratchpad}")
     ])
 
-    # Create the agent using tool-calling approach with streaming LLM
     llm_with_streaming = get_azure_llm(event_queue=event_queue)
     agent = create_tool_calling_agent(llm_with_streaming, tools, agent_prompt)
 
-    # Create agent executor
     agent_executor = AgentExecutor(
         agent=agent,
         tools=tools,
@@ -337,71 +314,78 @@ Provide the tool with the company name, company risks JSON, and mandate requirem
     return agent_executor
 
 
+# ============================================================================
+# MAIN ANALYSIS FUNCTION - REAL-TIME EVENT STREAMING
+# ============================================================================
+
 def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dict[str, Any]]:
     """
-    Run risk assessment on companies using the agent and tool approach.
-    Streams events in REAL-TIME via event queue.
+    Executes risk assessment for multiple companies.
+    Streams all events in real-time via event_queue for WebSocket delivery.
 
     Args:
-        data: Dictionary containing:
-            - companies: List of company dictionaries with Company and Risks
-            - risk_parameters: Dictionary of mandate risk parameters
-        event_queue: Optional queue to put streaming events (for real-time sending)
+        data: Contains 'companies' list and 'risk_parameters' dictionary
+        event_queue: Queue to put real-time streaming events
 
     Returns:
-        List of dictionaries with: {company_name, overall_status, reason}
+        List of analysis results with verdicts for each company
     """
     import queue
+
+    set_event_queue_global(event_queue)
 
     companies = data.get('companies', [])
     risk_parameters = data.get('risk_parameters', {})
 
     if not companies:
-        raise ValueError("❌ Companies list cannot be empty")
+        raise ValueError("Companies list cannot be empty")
     if not risk_parameters:
-        raise ValueError("❌ Risk parameters cannot be empty")
+        raise ValueError("Risk parameters cannot be empty")
 
-    print(f"\n📊 Starting risk assessment for {len(companies)} companies...")
+    print(f"\nStarting risk assessment for {len(companies)} companies...")
 
-    # Put session start event in queue IMMEDIATELY
     if event_queue:
         event_queue.put({
             "type": "session_start",
-            "message": f" Starting Risk Assessment of Investment Ideas for {len(companies)} companies...",
-            "companies_count": len(companies)
+            "subprocess": "Risk Assessment of Investment Ideas",
+            "message": f"Starting Risk Assessment of Investment Ideas for {len(companies)} companies",
+            "companies_count": len(companies),
+            "timestamp": datetime.now().isoformat()
         })
 
-    # Create agent (with event_queue for streaming)
     agent_executor = create_risk_assessment_agent(event_queue=event_queue)
-
-    # Prepare mandate as JSON string
     mandate_json = json.dumps(risk_parameters, indent=2)
 
     all_results = []
 
-    # Process each company through the agent
     for i, company in enumerate(companies, 1):
         try:
-            # Handle both 'Company' and 'Company ' keys (with or without trailing space)
             company_name = company.get('Company') or company.get('Company ') or f'Company_{i}'
             company_risks = company.get('Risks', {})
             company_risks_json = json.dumps(company_risks, indent=2)
 
-            print(f"\n▶️  Processing {company_name}...")
+            print(f"\nProcessing {company_name}...")
 
-            # Put analysis start event IMMEDIATELY
             if event_queue:
                 event_queue.put({
                     "type": "analysis_start",
-                    "company": company_name,
-                    "message": f" Analyzing {company_name}...",
-                    "timestamp": __import__("datetime").datetime.now().isoformat()
+                    "subprocess": "Risk Assessment of Investment Ideas",
+                    "company_name": company_name,
+                    "message": f"Starting analysis for {company_name}",
+                    "timestamp": datetime.now().isoformat()
                 })
 
-            # Reset capture for this company
+            if event_queue:
+                event_queue.put({
+                    "type": "thinking_session_start",
+                    "subprocess": "Risk Assessment of Investment Ideas",
+                    "company_name": company_name,
+                    "message": f"Beginning risk analysis thinking process",
+                    "timestamp": datetime.now().isoformat()
+                })
+
             tool_output_capture["last_json"] = None
 
-            # Create task for agent
             task = f"""
             Analyze the following company against mandate requirements:
 
@@ -412,111 +396,71 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
             Use the analyze_company_risks tool to perform the analysis.
             """
 
-            # Put thinking event IMMEDIATELY
-            if event_queue:
-                event_queue.put({
-                    "type": "llm_thinking",
-                    "company": company_name,
-                    "message": f" LLM analyzing risks for {company_name}...",
-                    "timestamp": __import__("datetime").datetime.now().isoformat()
-                })
-
-            # Invoke agent (agent will call the tool internally)
             response = agent_executor.invoke({"input": task})
 
-            # ✅ GET JSON FROM CAPTURED TOOL OUTPUT (not from agent response)
+            if event_queue:
+                event_queue.put({
+                    "type": "thinking_session_end",
+                    "subprocess": "Risk Assessment of Investment Ideas",
+                    "company_name": company_name,
+                    "message": f"Completed thinking process",
+                    "timestamp": datetime.now().isoformat()
+                })
+
             if tool_output_capture["last_json"]:
                 result = tool_output_capture["last_json"]
                 all_results.append(result)
 
-                print(f"   ✅ {result['company_name']}: {result['overall_status']}")
+                overall_status = result.get('overall_assessment', {}).get('status', 'UNKNOWN')
+                print(f"Result for {result['company_name']}: {overall_status}")
 
-                # Stream parameter analysis events
                 for param_name, param_analysis in result.get('parameter_analysis', {}).items():
                     if event_queue:
                         event_queue.put({
                             "type": "parameter_analysis",
+                            "subprocess": "Risk Assessment of Investment Ideas",
                             "company_name": result['company_name'],
                             "parameter": param_name,
                             "status": param_analysis.get('status', 'UNKNOWN'),
                             "reason": param_analysis.get('reason', ''),
-                            "timestamp": __import__("datetime").datetime.now().isoformat()
+                            "timestamp": datetime.now().isoformat()
                         })
-                        print(f"      • {param_name}: {param_analysis.get('status')} - {param_analysis.get('reason')}")
 
-                # Put analysis complete event with overall verdict
                 if event_queue:
+                    overall_assessment = result.get('overall_assessment', {})
                     event_queue.put({
                         "type": "analysis_complete",
+                        "subprocess": "Risk Assessment of Investment Ideas",
                         "company_name": result['company_name'],
-                        "overall_status": result['overall_status'],
-                        "overall_reason": result.get('overall_reason', ''),
+                        "overall_status": overall_assessment.get('status', 'UNKNOWN'),
+                        "overall_reason": overall_assessment.get('reason', ''),
                         "parameter_analysis": result.get('parameter_analysis', {}),
-                        "message": f"Risk Assessment of Investment Ideas Analysis complete for {result['company_name']}",
-                        "timestamp": __import__("datetime").datetime.now().isoformat()
+                        "message": f"Risk Assessment of Investment Ideas completed",
+                        "timestamp": datetime.now().isoformat()
                     })
-                    print(f"   → Overall: {result.get('overall_reason', '')}")
             else:
-                # Fallback if capture didn't work
-                raise ValueError("Tool did not produce JSON output")
+                raise ValueError("Tool did not produce output")
 
         except Exception as e:
-            print(f" Error processing {company_name}: {str(e)}")
+            print(f"Error processing {company_name}: {str(e)}")
             all_results.append({
                 "company_name": company_name,
                 "overall_status": "UNSAFE",
-                "reason": f"Analysis failed"
+                "overall_reason": "Analysis failed"
             })
 
-    print(f"\n✅ Risk assessment completed for {len(all_results)} companies")
+    print(f"\nRisk Assessment of Investment Ideas completed for {len(all_results)} companies")
 
-    # Put session complete event with FINAL RESULTS
     if event_queue:
         event_queue.put({
             "type": "session_complete",
+            "subprocess": "Risk Assessment of Investment Ideas",
             "status": "success",
-            "message": f"Risk Assessment of Investment Ideas completed for {len(all_results)} companies",
+            "message": f"Risk Assessment of Investment Ideas completed for all companies",
+            "total_companies": len(all_results),
             "results": all_results,
-            "timestamp": __import__("datetime").datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat()
         })
-        event_queue.put(None)  # Sentinel to indicate end of stream
+        event_queue.put(None)
 
     return all_results
-
-# === API USAGE ONLY ===
-# This module is designed to be used via the FastAPI WebSocket endpoint
-#
-# WebSocket endpoint: ws://localhost:8000/risk/analyze
-#
-# Send a JSON request with:
-# {
-#     "companies": [
-#         {
-#             "Company ": "Company Name",
-#             "Risks": {
-#                 "Competitive Position": "description",
-#                 "Governance Quality": "description",
-#                 "Customer Concentration Risk": "description",
-#                 "Vendor / Platform Dependency": "description",
-#                 "Regulatory / Legal Risk": "description",
-#                 "Business Model Complexity": "description"
-#             }
-#         }
-#     ],
-#     "risk_parameters": {
-#         "Competitive Position": "mandate requirement",
-#         "Governance Quality": "mandate requirement",
-#         "Customer Concentration Risk": "mandate requirement",
-#         "Vendor / Platform Dependency": "mandate requirement",
-#         "Regulatory / Legal Risk": "mandate requirement",
-#         "Business Model Complexity": "mandate requirement"
-#     }
-# }
-#
-# The endpoint will stream events in real-time:
-# - session_start: Analysis starting
-# - analysis_start: Per company
-# - llm_thinking: LLM processing started
-# - thinking_token: Real-time LLM thinking (actual agent reasoning)
-# - analysis_complete: Verdict ready for company
-# - session_complete: All done with final JSON results

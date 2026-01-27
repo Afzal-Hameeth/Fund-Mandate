@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException, Form
 import json
 import queue
 import asyncio
@@ -8,106 +8,89 @@ from langchain_core.callbacks import BaseCallbackHandler
 import shutil
 
 from agents.agent1_parse_mandate import create_parse_agent
-from agents.agent2_filter_companies import create_filter_agent
+from agents.agent2_filter_companies import create_sector_and_industry_research_agent
+from database.repositories.fundRepository import FundMandateRepository
 
 router = APIRouter(prefix="/api", tags=["fund-sourcing"])
 
 
-# ==================================================
-# BLOCK-BASED STREAMING CALLBACK
-# ==================================================
-
-class BlockStreamingCallback(BaseCallbackHandler):
-    """Streams agent thinking in COMPLETE BLOCKS (not tokens)"""
+class CleanEventCallback(BaseCallbackHandler):
+    """Emits tool events + agent thinking without repetition"""
 
     def __init__(self, event_queue: queue.Queue):
         self.event_queue = event_queue
-        self.buffer = ""
-        self.in_thought = False
-        self.in_action = False
-        self.in_action_input = False
+        self.last_tool = None
+        self.thought_emitted = False
+        self.thinking_buffer = ""
 
     def on_llm_new_token(self, token: str, **kwargs):
-        """Buffer tokens until we have a complete block"""
-        self.buffer += token
+        """Capture thinking tokens and emit complete thoughts"""
+        self.thinking_buffer += token
 
-        # Detect and emit COMPLETE blocks
-        if "Thought:" in self.buffer and not self.in_thought:
-            self.in_thought = True
+        # Look for complete Thought: ... Action: pattern
+        if "Thought:" in self.thinking_buffer and "Action:" in self.thinking_buffer:
+            parts = self.thinking_buffer.split("Thought:")
+            if len(parts) > 1:
+                thought_part = parts[-1].split("Action:")[0].strip()
+                if thought_part and len(thought_part) > 10:  # Substantial thought
+                    self.event_queue.put({
+                        "type": "agent_thinking",
+                        "step": "thought",
+                        "content": thought_part,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    # Clear buffer after emitting
+                    self.thinking_buffer = self.thinking_buffer.split("Action:")[1]
 
-        if self.in_thought and "Action:" in self.buffer:
-            # Extract complete thought
-            thought_text = self.buffer.split("Thought:")[-1].split("Action:")[0].strip()
-            if thought_text:
-                self.event_queue.put({
-                    "type": "agent_thinking",
-                    "step": "thought",
-                    "content": thought_text,
-                    "timestamp": datetime.now().isoformat()
-                })
-            self.in_thought = False
-            self.in_action = True
-
-        if self.in_action and "Action Input:" in self.buffer:
-            # Extract complete action
-            action_text = self.buffer.split("Action:")[-1].split("Action Input:")[0].strip()
-            if action_text:
-                self.event_queue.put({
-                    "type": "agent_thinking",
-                    "step": "action",
-                    "content": action_text,
-                    "timestamp": datetime.now().isoformat()
-                })
-            self.in_action = False
-            self.in_action_input = True
-
-        if self.in_action_input and "\n" in self.buffer.split("Action Input:")[-1]:
-            # Extract complete action input (JSON)
-            action_input_text = self.buffer.split("Action Input:")[-1].strip()
-            if action_input_text:
-                self.event_queue.put({
-                    "type": "agent_thinking",
-                    "step": "action_input",
-                    "content": action_input_text,
-                    "timestamp": datetime.now().isoformat()
-                })
-            self.in_action_input = False
-            self.buffer = ""
-
-    def on_tool_start(self, serialized: dict, **kwargs):
-        """Tool is about to execute"""
-        self.event_queue.put({
-            "type": "tool_start",
-            "tool": serialized.get("name", "unknown"),
-            "message": f"Executing: {serialized.get('name', 'unknown')}",
-            "timestamp": datetime.now().isoformat()
-        })
-
-    def on_llm_end(self, response, **kwargs):
-        """Flush any remaining buffer"""
-        if self.buffer.strip():
+    def on_agent_action(self, action, **kwargs):
+        """Capture agent's tool selection"""
+        if not self.thought_emitted:
             self.event_queue.put({
                 "type": "agent_thinking",
-                "step": "final",
-                "content": self.buffer.strip(),
+                "step": "action",
+                "content": f"Using tool: {action.tool}",
                 "timestamp": datetime.now().isoformat()
             })
-            self.buffer = ""
+            self.thought_emitted = True
 
+    def on_tool_start(self, serialized: dict, input_str: str, **kwargs):
+        """Tool is about to execute"""
+        tool_name = serialized.get("name", "unknown")
 
-# ==================================================
-# ENDPOINT 1: REST FILE UPLOAD WITH QUERY
-# ==================================================
+        self.event_queue.put({
+            "type": "tool_start",
+            "tool": tool_name,
+            "message": f"{tool_name} is processing...",
+            "timestamp": datetime.now().isoformat()
+        })
+        self.last_tool = tool_name
+
+    def on_tool_end(self, output: str, **kwargs):
+        """Tool execution complete"""
+        tool_name = self.last_tool or "tool"
+        self.event_queue.put({
+            "type": "tool_end",
+            "tool": tool_name,
+            "message": f"{tool_name} completed",
+            "timestamp": datetime.now().isoformat()
+        })
+        self.thought_emitted = False
+        self.thought_emitted = False
+
 
 @router.post("/parse-mandate-upload")
-async def parse_mandate_upload(file: UploadFile = File(...), query: str = "Generate mandate criteria"):
+async def parse_mandate_upload(
+    file: UploadFile = File(...),
+    query: str = Form("Generate mandate criteria"),
+    fund_name: str = Form(...),
+    fund_size: str = Form(...),
+    description: str = Form(...)
+):
     """
-    Upload PDF file + query via REST
-    Saves file and returns filename + query for UI to pass to WebSocket
+    Upload PDF file + fund details via REST
+    Creates database entry for FundMandate and saves file
 
-    curl -X POST http://localhost:8000/api/parse-mandate-upload -F "file=@path/to/file.pdf" -F "query=Your query"
-
-    Returns: {"status": "success", "filename": "...", "query": "...", "message": "..."}
+    Returns: {"status": "success", "mandate_id": 1, "filename": "...", "fund_name": "...", "fund_size": "...", "file_path": "...", "message": "..."}
     """
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files allowed")
@@ -121,14 +104,28 @@ async def parse_mandate_upload(file: UploadFile = File(...), query: str = "Gener
         with open(file_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
+        # Create database entry for FundMandate
+        mandate = await FundMandateRepository.create_mandate(
+            fund_name=fund_name,
+            fund_size=fund_size,
+            source_url=str(file_path),
+            description=description
+        )
+
         return {
             "status": "success",
+            "mandate_id": mandate.id,
             "filename": file.filename,
+            "fund_name": mandate.fund_name,
+            "fund_size": mandate.fund_size,
+            "file_path": str(file_path),
             "query": query,
-            "message": f"File received: {file.filename}"
+            "message": f"Fund mandate created and file saved: {file.filename}"
         }
 
     except Exception as e:
+        import traceback
+        print(f"Error in parse_mandate_upload: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
@@ -168,10 +165,6 @@ async def upload_mandate(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
-# ==================================================
-# ENDPOINT 2: WEBSOCKET FOR PROCESSING
-# ==================================================
-
 @router.websocket("/ws/parse-mandate/option2/{session_id}")
 async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
     """
@@ -191,7 +184,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
         # Session start
         event_queue.put({
             "type": "session_start",
-            "message": "Mandate Parsing Agent initialized",
+            "message": "Parsing Agent initialized",
             "session_id": session_id,
             "timestamp": datetime.now().isoformat()
         })
@@ -247,7 +240,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
 
         event_queue.put({
             "type": "llm_thinking",
-            "message": "Mandate Parsing Agent is analyzing your fund mandate...",
+            "message": "Parsing Agent is analyzing your fund mandate...",
             "timestamp": datetime.now().isoformat()
         })
 
@@ -257,10 +250,10 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
             input_prompt = f"Scan {pdf_path} Query: {query}"
 
             # Setup callbacks
-            callbacks = [BlockStreamingCallback(event_queue=event_queue)]
+            callbacks = [CleanEventCallback(event_queue=event_queue)]
             config = {
                 "callbacks": callbacks,
-                "configurable": {"recursion_limit": 10}
+                "configurable": {"recursion_limit": 50}
             }
 
             # Execute in thread pool
@@ -281,7 +274,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
                 "type": "analysis_complete",
                 "status": "success",
                 "criteria": criteria,
-                "message": "Mandate Parsing Agent completed analysis!",
+                "message": "Parsing Agent completed analysis!",
                 "timestamp": datetime.now().isoformat()
             })
 
@@ -291,7 +284,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
                 "type": "analysis_complete",
                 "status": "error",
                 "error": str(e),
-                "message": f"Mandate Parsing Agent failed: {str(e)}",
+                "message": f"Parsing failed: {str(e)}",
                 "timestamp": datetime.now().isoformat()
             })
             print(f"Error: {traceback.format_exc()}")
@@ -300,7 +293,7 @@ async def ws_parse_mandate_option2(websocket: WebSocket, session_id: str):
         event_queue.put({
             "type": "session_complete",
             "status": "success",
-            "message": "Mandate Parsing Agent session finished!",
+            "message": "Parsing Agent session finished!",
             "timestamp": datetime.now().isoformat()
         })
         event_queue.put(None)
@@ -351,7 +344,7 @@ async def ws_filter_companies(websocket: WebSocket, session_id: str):
         # Session start
         event_queue.put({
             "type": "session_start",
-            "message": "Sector & Industry Research Agent is initialized",
+            "message": "Sector & Industry Research Agent initialized",
             "session_id": session_id,
             "timestamp": datetime.now().isoformat()
         })
@@ -393,19 +386,19 @@ async def ws_filter_companies(websocket: WebSocket, session_id: str):
 
         event_queue.put({
             "type": "llm_thinking",
-            "message": "Sector & Industry Research Agent is processing your filters...",
+            "message": "Sector & Industry Research Agent is filtering companies...",
             "timestamp": datetime.now().isoformat()
         })
 
         try:
             # Create filter agent
-            filter_agent_with_streaming = create_filter_agent()
+            filter_agent_with_streaming = create_sector_and_industry_research_agent()
 
             # Setup block streaming callbacks
-            callbacks = [BlockStreamingCallback(event_queue=event_queue)]
+            callbacks = [CleanEventCallback(event_queue=event_queue)]
             config = {
                 "callbacks": callbacks,
-                "configurable": {"recursion_limit": 10}
+                "configurable": {"recursion_limit": 50}
             }
 
             # Execute in thread pool
@@ -442,7 +435,7 @@ async def ws_filter_companies(websocket: WebSocket, session_id: str):
                 "type": "analysis_complete",
                 "status": "error",
                 "error": str(e),
-                "message": f"Sector & Industry Research Agent failed: {str(e)}",
+                "message": f"❌ Filtering failed: {str(e)}",
                 "timestamp": datetime.now().isoformat()
             })
             print(f"Error in ws_filter_companies: {traceback.format_exc()}")

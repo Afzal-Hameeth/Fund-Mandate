@@ -8,6 +8,8 @@ import toast from 'react-hot-toast';
 const FundMandate: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [description, setDescription] = useState('');
+  const [fundName, setFundName] = useState('');
+  const [fundSize, setFundSize] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [parsedResult, setParsedResult] = useState<any | null>(null);
@@ -18,6 +20,10 @@ const FundMandate: React.FC = () => {
     screening: false,
     risk: false,
   });
+  // State for edited parameters
+  const [editedSourcingParams, setEditedSourcingParams] = useState<Record<string, string>>({});
+  const [editedScreeningParams, setEditedScreeningParams] = useState<Record<string, string>>({});
+  const [editedRiskParams, setEditedRiskParams] = useState<Record<string, string>>({});
 
   // Streaming state
   const [streamingEvents, setStreamingEvents] = useState<any[]>([]);
@@ -32,6 +38,7 @@ const FundMandate: React.FC = () => {
   const [capabilitiesResult, setCapabilitiesResult] = useState<any>(null);
   const [pendingSubmitData, setPendingSubmitData] = useState<{ file: File; description: string } | null>(null);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [subprocesses, setSubprocesses] = useState<any[]>([]);
 
   const extractedParamsRef = useRef<HTMLDivElement>(null);
   const streamingPanelRef = useRef<HTMLDivElement>(null);
@@ -53,6 +60,33 @@ const FundMandate: React.FC = () => {
       streamingPanelRef.current.scrollTop = streamingPanelRef.current.scrollHeight;
     }
   }, [streamingEvents]);
+
+  // Initialize edited parameters when parsed result changes
+  useEffect(() => {
+    if (isSubmitted && parsedResult) {
+      const sourcing = getMandatoryThresholds();
+      const screening = getPreferredMetrics();
+      const risk = getRiskFactors();
+
+      const editedSourcing: Record<string, string> = {};
+      sourcing.forEach((item: any) => {
+        editedSourcing[item.key] = item.value;
+      });
+      setEditedSourcingParams(editedSourcing);
+
+      const editedScreening: Record<string, string> = {};
+      screening.forEach((item: any) => {
+        editedScreening[item.key] = item.value;
+      });
+      setEditedScreeningParams(editedScreening);
+
+      const editedRisk: Record<string, string> = {};
+      risk.forEach((item: any) => {
+        editedRisk[item.key] = item.value;
+      });
+      setEditedRiskParams(editedRisk);
+    }
+  }, [isSubmitted, parsedResult]);
 
   const toggleSection = (section: string) => {
     setOpenSections((prev) => ({
@@ -132,9 +166,9 @@ const FundMandate: React.FC = () => {
     setCapabilitiesResult(null);
 
     try {
-      const capabilitiesUrl = API.makeResearchUrl(API.ENDPOINTS.CAPABILITIES.BASE_URL());
+      const capabilitiesUrl = API.makeResearchUrl(API.ENDPOINTS.RESEARCH.CAPABILITIES());
       console.log('Fetching capabilities from:', capabilitiesUrl);
-      
+
       const response = await fetch(capabilitiesUrl, {
         method: 'GET',
         headers: {
@@ -150,6 +184,37 @@ const FundMandate: React.FC = () => {
       const data = await response.json();
       console.log('Capabilities result:', data);
       setCapabilitiesResult(data);
+
+      // Extract all subprocesses from capabilities data
+      const extractedSubprocesses: any[] = [];
+
+      // Handle both single object and array responses
+      const capabilities = Array.isArray(data) ? data : [data];
+
+      capabilities.forEach((capability: any) => {
+        if (capability.processes && Array.isArray(capability.processes)) {
+          capability.processes.forEach((process: any) => {
+            if (process.subprocesses && Array.isArray(process.subprocesses)) {
+              process.subprocesses.forEach((subprocess: any) => {
+                extractedSubprocesses.push({
+                  id: subprocess.id,
+                  name: subprocess.name,
+                  category: subprocess.category
+                });
+              });
+            }
+          });
+        }
+      });
+      setSubprocesses(extractedSubprocesses);
+
+      // Initialize open sections based on extracted subprocesses
+      const initialOpenSections: Record<string, boolean> = {};
+      extractedSubprocesses.forEach((sp, idx) => {
+        initialOpenSections[sp.id] = idx === 0; // Open first subprocess by default
+      });
+      setOpenSections(initialOpenSections);
+
       setShowCapabilitiesModal(true);
     } catch (error) {
       console.error('Error fetching capabilities:', error);
@@ -177,6 +242,9 @@ const FundMandate: React.FC = () => {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('query', query);
+      formData.append('fund_name', fundName.trim());
+      formData.append('fund_size', fundSize.trim());
+      formData.append('description', description.trim());
 
       const uploadResponse = await fetch(API.makeUrl(API.ENDPOINTS.FUND_MANDATE.UPLOAD()), {
         method: 'POST',
@@ -558,133 +626,139 @@ const FundMandate: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-8 px-8 py-8">
-          {/* Form Section */}
-          <div className={`flex ${isSubmitting ? 'flex-row' : 'flex-col md:flex-row'} gap-8`}>
-            {/* Left: Info Card (hide after upload) */}
-            {!isSubmitting && !isSubmitted && (
-              <div className="flex flex-col gap-3 md:w-1/3">
-                <div className="p-4 border border-indigo-200 rounded-xl bg-gradient-to-br from-indigo-50 via-white to-indigo-50/50 shadow-sm hover:shadow-md transition-all duration-300">
-                  <div className="flex items-start mb-3">
-                    <div className="p-2 bg-indigo-100 rounded-xl mr-3 shadow-sm">
-                      <FiFile className="w-5 h-5 text-indigo-600" />
-                    </div>
+        <div className="flex gap-6 px-8 py-3">
+          {/* Left Side: Form */}
+          <div className="flex-1 flex flex-col gap-6">
+            {/* Fund Details Container - All in one box */}
+            <div className="p-6 border border-indigo-200 rounded-xl bg-gradient-to-br from-indigo-50 via-white to-indigo-50/50 shadow-sm hover:shadow-md transition-all duration-300">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 bg-indigo-100 rounded-xl">
+                  <FiFile className="w-5 h-5 text-indigo-600" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900">Fund Mandate Details</h3>
+                <p className='text-sm p-2'>Enter required mandate details and upload mandate document</p>
+              </div>
+
+              <form onSubmit={handleSubmit}>
+                <div className="flex gap-8">
+                  {/* Left: Fund Name and Size */}
+                  <div className="flex-1 max-w-xs space-y-4">
                     <div>
-                      <h3 className="text-lg font-bold text-gray-900 mb-1">Fund Mandate PDF</h3>
-                      <p className="text-sm text-indigo-600 font-medium">Document Upload</p>
-                    </div>
-                  </div>
-
-                  <p className="text-gray-600 text-sm leading-relaxed mb-3">
-                    Upload your fund mandate documents in PDF format. Fund mandate document contains set of rules and guidelines that defines how a fund must be managed.
-                  </p>
-
-                  <div className="bg-white/70 rounded-lg p-3 border border-indigo-100 mb-3">
-                    <div className="flex items-center mb-2">
-
-                      <p className="text-sm font-semibold text-gray-800">Requirements</p>
-                    </div>
-                    <div className="space-y-1 text-sm text-gray-600">
-                      <div className="flex items-center">
-                        <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full mr-3 flex-shrink-0"></span>
-                        <span>PDF files only</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Right: Upload Form + Streaming Panel (full width after upload) */}
-            <div className={`flex gap-8 ${isSubmitting ? 'w-full' : 'flex-1'}`}>
-              {/* Form */}
-              <div className={`flex-1 ${isSubmitting ? 'max-w-full' : 'max-w-2xl'}`}>
-                <form onSubmit={handleSubmit} className="space-y-4">
-              {/* PDF Upload Section */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Upload Fund Mandate PDF
-                </label>
-
-                <div className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
-                  selectedFile
-                    ? 'border-indigo-400 bg-indigo-50'
-                    : 'border-indigo-300 hover:border-indigo-400 hover:bg-indigo-50'
-                }`}>
-                  <input
-                    type="file"
-                    accept=".pdf"
-                    onChange={handleFileInput}
-                    className="hidden"
-                    id="fund-mandate-upload"
-                    disabled={isSubmitting}
-                  />
-                  <label
-                    htmlFor="fund-mandate-upload"
-                    className={`cursor-pointer ${isSubmitting ? 'cursor-not-allowed opacity-50' : ''}`}
-                  >
-                    <FiUpload className={`w-12 h-12 mx-auto mb-4 ${selectedFile ? 'text-indigo-500' : 'text-indigo-400'}`} />
-                    <p className="text-sm font-medium text-gray-900 mb-1">
-                      Click to upload PDF file
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      PDF files only, up to 10MB
-                    </p>
-                  </label>
-                </div>
-
-                {errors.file && (
-                  <div className="p-2 bg-red-50 border border-red-200 rounded-lg mt-2">
-                    <p className="text-red-600 text-sm">{errors.file}</p>
-                  </div>
-                )}
-
-                {selectedFile && !errors.file && (
-                  <div className="mt-2 p-2 bg-indigo-50 border border-indigo-200 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-indigo-700 text-sm">{selectedFile.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedFile(null);
-                          setErrors((prev) => ({ ...prev, file: undefined }));
-                        }}
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Fund Name
+                      </label>
+                      <input
+                        type="text"
+                        value={fundName}
+                        onChange={(e) => setFundName(e.target.value)}
+                        placeholder="Enter fund name"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                         disabled={isSubmitting}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <FiTrash className="w-4 h-4" />
-                      </button>
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Fund Size
+                      </label>
+                      <input
+                        type="text"
+                        value={fundSize}
+                        onChange={(e) => setFundSize(e.target.value)}
+                        placeholder="Enter fund size (e.g., $100M)"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        disabled={isSubmitting}
+                      />
                     </div>
                   </div>
-                )}
-              </div>
 
-              {/* Description Section */}
-              <div>
-                <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
-                  User Intent
-                </label>
-                <textarea
-                  id="description"
-                  value={description}
-                  onChange={handleDescriptionChange}
-                  placeholder="Provide a detailed user intent of this fund mandate, including objectives, requirements, and any specific instructions..."
-                  className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[80px] text-sm"
-                  disabled={isSubmitting}
-                  required
-                />
+                  {/* Right: PDF Upload */}
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Upload Fund Mandate PDF
+                    </label>
+                    <div className={`border-2 border-dashed rounded-xl py-2 px-4 text-center transition-colors ${
+                      selectedFile
+                        ? 'border-indigo-400 bg-indigo-50'
+                        : 'border-indigo-300 hover:border-indigo-400 hover:bg-indigo-50'
+                    }`}>
+                      <input
+                        type="file"
+                        accept=".pdf"
+                        onChange={handleFileInput}
+                        className="hidden"
+                        id="fund-mandate-upload"
+                        disabled={isSubmitting}
+                      />
+                      <label
+                        htmlFor="fund-mandate-upload"
+                        className={`cursor-pointer ${isSubmitting ? 'cursor-not-allowed opacity-50' : ''}`}
+                      >
+                        <FiUpload className={`w-12 h-12 mx-auto mb-4 ${selectedFile ? 'text-indigo-500' : 'text-indigo-400'}`} />
+                        <p className="text-sm font-medium text-gray-900 mb-1">
+                          Click to upload PDF file
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          PDF files only, up to 10MB
+                        </p>
+                      </label>
+                    </div>
 
-                {errors.description && (
-                  <div className="p-2 bg-red-50 border border-red-200 rounded-lg mt-2">
-                    <p className="text-red-600 text-sm">{errors.description}</p>
+                    {errors.file && (
+                      <div className="p-2 bg-red-50 border border-red-200 rounded-lg mt-2">
+                        <p className="text-red-600 text-sm">{errors.file}</p>
+                      </div>
+                    )}
+
+                    {selectedFile && !errors.file && (
+                      <div className="mt-2 p-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <span className="text-indigo-700 text-sm">{selectedFile.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedFile(null);
+                              setErrors((prev) => ({ ...prev, file: undefined }));
+                            }}
+                            disabled={isSubmitting}
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            <FiTrash className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                </div>
+              </form>
+            </div>
+
+            {/* User Intent - Inline (no container) */}
+            <div>
+              <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+                User Intent
+              </label>
+              <textarea
+                id="description"
+                value={description}
+                onChange={handleDescriptionChange}
+                placeholder="Provide a detailed user intent of this fund mandate, including objectives, requirements, and any specific instructions..."
+                className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[80px] text-sm bg-white"
+                disabled={isSubmitting}
+                required
+              />
+
+              {errors.description && (
+                <div className="p-2 bg-red-50 border border-red-200 rounded-lg mt-2">
+                  <p className="text-red-600 text-sm">{errors.description}</p>
+                </div>
+              )}
 
               {/* Submit Button */}
-              <div className="flex justify-end pt-3">
+              <div className="flex justify-end pt-4">
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleSubmit}
                   disabled={!canSubmit}
                   className={`px-6 py-2 rounded-lg font-semibold transition-all duration-200 flex items-center gap-2 ${canSubmit
                     ? 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-lg focus:bg-indigo-700 active:scale-95'
@@ -704,10 +778,10 @@ const FundMandate: React.FC = () => {
                   )}
                 </button>
               </div>
-            </form>
-              </div>
+            </div>
+          </div>
 
-              {/* Agent Thinking Container - Collapsible (Right Sidebar) */}
+          {/* Right Side: Agent Thinking Container - Collapsible Sidebar */}
               {(showStreamingPanel || streamingEvents.length > 0) && (
                 <div className={`transition-all duration-300 flex-shrink-0 ${agentThinkingOpen ? 'w-72' : 'w-10'}`}>
                   <div className="flex flex-col bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden h-[calc(100vh-280px)] sticky top-4">
@@ -777,8 +851,6 @@ const FundMandate: React.FC = () => {
                   </div>
                 </div>
               )}
-            </div>
-          </div>
         </div>
 
         {/* Post-Submission Section */}
@@ -787,9 +859,9 @@ const FundMandate: React.FC = () => {
             <div className="max-w-4xl mx-auto space-y-10">
               {/* Introduction Header Area (De-contained) */}
               <div>
-                  <h2 className="text-lg font-bold text-gray-900 mb-2 tracking-tight">Extracted Parameters</h2>
+                  <h2 className="text-lg font-bold text-gray-900 mb-2 tracking-tight">Mandate Parameters</h2>
                 <p className="text-sm text-gray-500 leading-relaxed font-medium">
-                  List of Agent Parameters extracted from Parsed PDF Document for Sourcing, Screening and Risk Analysis.
+                  List of parameters extracted and compared against Capability Compass.
                 </p>
               </div>
 
@@ -825,87 +897,86 @@ const FundMandate: React.FC = () => {
               {/* Collapsible Sections (Fully naked/De-contained rows) */}
               {isSubmitted && (
                 <div className="space-y-2">
-                {/* 1. Sourcing Agent Parameters */}
-                <div className="transition-all duration-300">
-                  <button
-                    onClick={() => toggleSection('sourcing')}
-                    className="w-full flex items-center gap-4 py-5 text-left border-b border-gray-100 hover:border-indigo-100 group transition-all"
-                  >
-                    {openSections.sourcing ? <FiChevronUp className="text-indigo-600 flex-shrink-0" /> : <FiChevronDown className="text-gray-300 group-hover:text-gray-400 flex-shrink-0" />}
-                    <span className="font-bold text-gray-800 tracking-tight">Sector & Industry Research</span>
-                  </button>
-                  {openSections.sourcing && (
-                    <div className="py-6 animate-in fade-in slide-in-from-top-1 duration-300">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {getMandatoryThresholds().map((threshold) => (
-                          <div key={threshold.key} className="flex flex-col gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                            <div className="flex items-center gap-2">
-                              <span className="w-2 h-2 bg-indigo-400 rounded-full flex-shrink-0" />
-                              <span className="text-sm font-semibold text-gray-800">{threshold.key}</span>
+                  {subprocesses.length > 0 ? (
+                    subprocesses.map((subprocess, index) => (
+                      <div key={subprocess.id} className="transition-all duration-300">
+                        <button
+                          onClick={() => toggleSection(subprocess.id)}
+                          className="w-full flex items-center gap-4 py-5 text-left border-b border-gray-100 hover:border-indigo-100 group transition-all"
+                        >
+                          {openSections[subprocess.id] ? <FiChevronUp className="text-indigo-600 flex-shrink-0" /> : <FiChevronDown className="text-gray-300 group-hover:text-gray-400 flex-shrink-0" />}
+                          <span className="font-bold text-gray-800 tracking-tight">{subprocess.name}</span>
+                          {subprocess.category && (
+                            <span className="text-xs text-gray-500 ml-auto bg-gray-100 px-2 py-1 rounded">{subprocess.category}</span>
+                          )}
+                        </button>
+                        {openSections[subprocess.id] && (
+                          <div className="py-6 animate-in fade-in slide-in-from-top-1 duration-300">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                              {index === 0 && getMandatoryThresholds().map((threshold) => (
+                                <div key={threshold.key} className="flex flex-col gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 bg-indigo-400 rounded-full flex-shrink-0" />
+                                    <label className="text-sm font-semibold text-gray-800">{threshold.key}</label>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={editedSourcingParams[threshold.key] || ''}
+                                    onChange={(e) => setEditedSourcingParams(prev => ({ ...prev, [threshold.key]: e.target.value }))}
+                                    className="text-sm px-2 py-1 border border-gray-200 rounded bg-gray-50 focus:bg-white focus:border-indigo-400 focus:outline-none"
+                                  />
+                                </div>
+                              ))}
+                              {index === 1 && getPreferredMetrics().map((metric) => (
+                                <div key={metric.key} className="flex flex-col gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 bg-indigo-400 rounded-full flex-shrink-0" />
+                                    <label className="text-sm font-semibold text-gray-800">{metric.key}</label>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={editedScreeningParams[metric.key] || ''}
+                                    onChange={(e) => setEditedScreeningParams(prev => ({ ...prev, [metric.key]: e.target.value }))}
+                                    className="text-sm px-2 py-1 border border-gray-200 rounded bg-gray-50 focus:bg-white focus:border-indigo-400 focus:outline-none"
+                                  />
+                                </div>
+                              ))}
+                              {index === 2 && getRiskFactors().map((factor) => (
+                                <div key={factor.key} className="flex flex-col gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 bg-indigo-400 rounded-full flex-shrink-0" />
+                                    <label className="text-sm font-semibold text-gray-800">{factor.key}</label>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={editedRiskParams[factor.key] || ''}
+                                    onChange={(e) => setEditedRiskParams(prev => ({ ...prev, [factor.key]: e.target.value }))}
+                                    className="text-sm px-2 py-1 border border-gray-200 rounded bg-gray-50 focus:bg-white focus:border-indigo-400 focus:outline-none"
+                                  />
+                                </div>
+                              ))}
                             </div>
-                            <span className="text-sm text-gray-600 ml-4">{threshold.value}</span>
                           </div>
-                        ))}
+                        )}
                       </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 2. Screening Agent Parameters */}
-                <div className="transition-all duration-300">
-                  <button
-                    onClick={() => toggleSection('screening')}
-                    className="w-full flex items-center gap-4 py-5 text-left border-b border-gray-100 hover:border-indigo-100 group transition-all"
-                  >
-                    {openSections.screening ? <FiChevronUp className="text-indigo-600 flex-shrink-0" /> : <FiChevronDown className="text-gray-300 group-hover:text-gray-400 flex-shrink-0" />}
-                    <span className="font-bold text-gray-800 tracking-tight">Bottom-Up Fundamental Analysis</span>
-                  </button>
-                  {openSections.screening && (
-                    <div className="py-6 animate-in fade-in slide-in-from-top-1 duration-300">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {getPreferredMetrics().map((metric) => (
-                          <div key={metric.key} className="flex flex-col gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                            <div className="flex items-center gap-2">
-                              <span className="w-2 h-2 bg-indigo-400 rounded-full flex-shrink-0" />
-                              <span className="text-sm font-semibold text-gray-800">{metric.key}</span>
-                            </div>
-                            <span className="text-sm text-gray-600 ml-4">{metric.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 3. Risk Factors Parameters */}
-                <div className="transition-all duration-300">
-                  <button
-                    onClick={() => toggleSection('risk')}
-                    className="w-full flex items-center gap-4 py-5 text-left border-b border-gray-100 hover:border-indigo-100 group transition-all"
-                  >
-                    {openSections.risk ? <FiChevronUp className="text-indigo-600 flex-shrink-0" /> : <FiChevronDown className="text-gray-300 group-hover:text-gray-400 flex-shrink-0" />}
-                    <span className="font-bold text-gray-800 tracking-tight">Risk Assessment of Investment Ideas</span>
-                  </button>
-                  {openSections.risk && (
-                    <div className="py-6 animate-in fade-in slide-in-from-top-1 duration-300">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
-                        {getRiskFactors().map((factor) => (
-                          <div key={factor.key} className="flex flex-col gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                            <div className="flex items-center gap-2">
-                              <span className="w-2 h-2 bg-indigo-400 rounded-full flex-shrink-0" />
-                              <span className="text-sm font-semibold text-gray-800">{factor.key}</span>
-                            </div>
-                            <span className="text-sm text-gray-600 ml-4">{factor.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                    ))
+                  ) : null}
                 <div className="flex justify-end pt-4">
                   <button
                     type="button"
-                    onClick={() => navigate('/sourcing-agent', { state: { sourcing: getMandatoryThresholds(), parsedResult } })}
+                    onClick={() => {
+                      const sourcingArray = Object.entries(editedSourcingParams).map(([key, value]) => ({ key, value }));
+                      const screeningArray = Object.entries(editedScreeningParams).map(([key, value]) => ({ key, value }));
+                      const riskArray = Object.entries(editedRiskParams).map(([key, value]) => ({ key, value }));
+                      navigate('/sourcing-agent', { 
+                        state: { 
+                          sourcing: sourcingArray,
+                          screening: screeningArray,
+                          riskAnalysis: riskArray,
+                          parsedResult 
+                        } 
+                      });
+                    }}
                     className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700"
                   >
                     Continue

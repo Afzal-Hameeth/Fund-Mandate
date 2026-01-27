@@ -1,6 +1,6 @@
 export const API = {
     BASE_URL: () => 'http://localhost:8000',
-    RESEARCH_BASE_URL: () => 'http://10.4.16.28:8501',
+    RESEARCH_BASE_URL: () => 'http://10.4.16.50:8501',
     // Helper to build absolute HTTP URLs and websocket URLs
     makeUrl: (path: string) => `${API.BASE_URL()}${path}`,
     makeResearchUrl: (path: string) => `${API.RESEARCH_BASE_URL()}${path}`,
@@ -29,10 +29,7 @@ export const API = {
             ANALYZE_STREAM: () => '/risk/analyze',
         },
         RESEARCH: {
-            CAPABILITIES: () => '/api/capabilities/research',
-        },
-        CAPABILITIES: {
-            BASE_URL: () => '/api/capabilities/1',
+            CAPABILITIES: () => '/api/capabilities/1',
         },
     },
 };

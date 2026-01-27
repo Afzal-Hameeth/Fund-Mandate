@@ -22,6 +22,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="FundAgent API",
     description="API for Compass Master application",
+    lifespan=lifespan
 )
 
 app.add_middleware(

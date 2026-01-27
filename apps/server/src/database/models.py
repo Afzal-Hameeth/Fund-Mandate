@@ -12,6 +12,8 @@ class TimestampMixin(models.Model):
 
 class FundMandate(TimestampMixin):
     id = fields.IntField(pk=True)
+    fund_name = fields.CharField(max_length=255)
+    fund_size = fields.CharField(max_length=255)
     source_url = fields.CharField(max_length=500)
     extracted_parameters = fields.ForeignKeyField('models.ExtractedParameters', related_name='fund_mandate', null=True)
     description = fields.TextField(null=True)
