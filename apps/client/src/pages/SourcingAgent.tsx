@@ -34,7 +34,7 @@ const SourcingAgent: React.FC = () => {
   const state = (location.state as any) ?? {};
   const parsed = state.parsedResult ?? null;
 
-  // Sourcing parameters with multiple fallback paths
+  // Sourcing parameters - use from state first, then fall back to parsed data
   const sourcingFromState = state.sourcing ?? null;
   const derivedSourcingFromParsed =
     parsed?.criteria?.mandate?.sourcing_parameters ??
@@ -44,7 +44,7 @@ const SourcingAgent: React.FC = () => {
     null;
   const sourcingList = sourcingFromState ?? toDisplayArray(derivedSourcingFromParsed);
 
-  // Screening parameters with multiple fallback paths
+  // Screening parameters - use from state first, then fall back to parsed data
   const screeningFromState = state.screening ?? null;
   const derivedScreeningFromParsed =
     parsed?.criteria?.mandate?.screening_parameters ??
@@ -54,7 +54,7 @@ const SourcingAgent: React.FC = () => {
     null;
   const screeningList = screeningFromState ?? toDisplayArray(derivedScreeningFromParsed);
 
-  // Risk analysis parameters with multiple fallback paths
+  // Risk analysis parameters - use from state first, then fall back to parsed data
   const riskAnalysisFromState = state.riskAnalysis ?? null;
   const derivedRiskAnalysisFromParsed =
     parsed?.criteria?.mandate?.risk_parameters ??
@@ -123,6 +123,37 @@ const SourcingAgent: React.FC = () => {
     setCompanyDetailOpen(false);
     setSelectedCompanyDetail(null);
   };
+
+  // Auto-select all parameters by default
+  useEffect(() => {
+    if (sourcingList.length > 0) {
+      const selectedKeys: Record<string, boolean> = {};
+      sourcingList.forEach((item: any) => {
+        selectedKeys[item.key] = true;
+      });
+      setSelectedSourcingKeys(selectedKeys);
+    }
+  }, [sourcingList]);
+
+  useEffect(() => {
+    if (screeningList.length > 0) {
+      const selectedKeys: Record<string, boolean> = {};
+      screeningList.forEach((item: any) => {
+        selectedKeys[item.key] = true;
+      });
+      setSelectedScreeningKeys(selectedKeys);
+    }
+  }, [screeningList]);
+
+  useEffect(() => {
+    if (riskAnalysisList.length > 0) {
+      const selectedKeys: Record<string, boolean> = {};
+      riskAnalysisList.forEach((item: any) => {
+        selectedKeys[item.key] = true;
+      });
+      setSelectedRiskAnalysisKeys(selectedKeys);
+    }
+  }, [riskAnalysisList]);
 
   useEffect(() => {
     if (riskAnalysisResponse?.investable_companies && riskAnalysisResultsRef.current) {
@@ -467,12 +498,12 @@ const SourcingAgent: React.FC = () => {
       };
 
       ws.onerror = (error) => {
-        console.error('âŒ WebSocket error:', error);
+        console.error(' WebSocket error:', error);
         toast.error('WebSocket connection error');
       };
 
       ws.onclose = () => {
-        console.log('ðŸ”Œ WebSocket closed');
+        console.log(' WebSocket closed');
         setIsSubmitting(false);
       };
     } catch (err) {
@@ -871,10 +902,10 @@ const SourcingAgent: React.FC = () => {
                               ) : (
                                 <FiChevronDown className="w-4 h-4 text-gray-600" />
                               )}
-                              <span className="text-black font-bold text-sm">{companyName}</span>
+                              <span className="text-black font-bold text-md">{companyName}</span>
                             </button>
                             {isExpanded && reason && (
-                              <div className="pl-8 pb-2 text-sm">
+                              <div className="pl-8 pb-2 text-md">
                                 <span className="text-gray-900 font-semibold">Reason:</span> <span className="text-black">{formatValue(reason)}</span>
                               </div>
                             )}
@@ -1217,14 +1248,14 @@ const SourcingAgent: React.FC = () => {
                         disabled={isSubmitting || riskAnalysisResponse ? true : getSelectedRiskAnalysisItems().length === 0}
                         className={`flex items-center space-x-2 px-6 py-3 rounded-lg font-medium transition-colors ${
                           isSubmitting || riskAnalysisResponse || getSelectedRiskAnalysisItems().length === 0
-                            ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                            ? ' cursor-not-allowed'
                             : 'bg-indigo-600 text-white hover:bg-indigo-700'
                         }`}
                       >
                         {isSubmitting ? (
                           <span>Analyzing...</span>
                         ) : riskAnalysisResponse ? (
-                          <span>âœ“ Analysis Complete</span>
+                          <span></span>
                         ) : (
                           <span>Analyze Risk</span>
                         )}

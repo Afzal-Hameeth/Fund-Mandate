@@ -14,12 +14,9 @@ from azure.identity import DefaultAzureCredential
 
 load_dotenv()
 
-
-# KeyVault Configuration
 KEY_VAULT_NAME = "fstodevazureopenai"
 KEY_VAULT_URL = f"https://{KEY_VAULT_NAME}.vault.azure.net/"
 
-# Secret names in KeyVault
 SECRETS_MAP = {
     "api_key": "llm-api-key",
     "endpoint": "llm-base-endpoint",
@@ -45,13 +42,12 @@ def get_secrets_from_key_vault():
                 secrets[key] = secret_value
 
             except Exception as e:
-
+                print(f" Failed to retrieve '{secret_name}': {e}")
                 raise
 
         return secrets
 
     except Exception as e:
-
         raise
 
 
@@ -61,8 +57,8 @@ def initialize_azure_llm_config():
 
     try:
 
+        # Get secrets from KeyVault
         secrets = get_secrets_from_key_vault()
-
 
         # Set environment variables for litellm/Azure
         os.environ["AZURE_API_KEY"] = secrets['api_key']
@@ -78,7 +74,6 @@ def initialize_azure_llm_config():
             "max_tokens": 2048
         }
 
-
         return llm_config
 
     except Exception as e:
@@ -86,7 +81,6 @@ def initialize_azure_llm_config():
         raise
 
 
-# Initialize Azure LLM config
 try:
     llm_config = initialize_azure_llm_config()
 except Exception as e:
@@ -94,139 +88,239 @@ except Exception as e:
     raise
 
 
-# ============================================================================
-# REAL-TIME OUTPUT STREAMING - CAPTURES AND FORWARDS IN REAL-TIME
-# ============================================================================
+class RealtimeEventCapture:
+    """Capture events in real-time from stdout - THREAD-SAFE VERSION"""
 
-class RealtimeStreamingWriter:
-    """Captures output in real-time and sends to WebSocket"""
-
-    def __init__(self, websocket: WebSocket, original_stdout, event_queue):
-        self.websocket = websocket
+    def __init__(self, original_stdout, callback, loop):
         self.original_stdout = original_stdout
+        self.callback = callback
+        self.loop = loop
         self.buffer = ""
-        self.event_queue = event_queue
-        self.last_thought_sent = False
-        self.last_tool_start_sent = False
-        self.last_tool_end_sent = False
+
+        # Track what we've already sent - STRICT ORDER
+        self.reasoning_sent = False
+        self.thought_sent = False
+        self.tool_start_sent = False
+        self.tool_end_sent = False
 
     def write(self, text: str) -> None:
-        """Intercept print statements in real-time"""
-        # Always print to terminal
+        """Write to terminal AND check for events"""
+        # Print to terminal immediately
         self.original_stdout.write(text)
         self.original_stdout.flush()
 
         # Add to buffer
         self.buffer += text
 
-        # Check for specific patterns and queue events
-        self._check_and_queue_events(text)
+        # Check for events in CORRECT ORDER
+        self._check_events_in_order()
 
-    def _check_and_queue_events(self, text: str) -> None:
-        """Check for key patterns and queue events"""
+    def _clean_text(self, text: str) -> str:
+        """Remove non-ASCII characters and special Unicode"""
+        cleaned = text.replace('\xa0', ' ')
+        cleaned = cleaned.replace('\n', ' ')
+        cleaned = cleaned.replace('\r', ' ')
+        cleaned = re.sub(r'[^\x20-\x7E]', '', cleaned)
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        return cleaned.strip()
+
+    def _check_events_in_order(self) -> None:
+        """Check for events in STRICT ORDER"""
         try:
-            # Extract and send THOUGHT in real-time (STEP 2)
-            if "Thought:" in text and not self.last_thought_sent:
-                thought_match = re.search(r'Thought:?\s*(.+?)(?=Using Tool:|$)', self.buffer, re.DOTALL)
-                if thought_match:
-                    thought = thought_match.group(1).strip()
-                    self.event_queue.append({
-                        "type": "step_2",
-                        "content": f"💭 STEP 2: Agent Thinking\n\n{thought}"
-                    })
-                    self.last_thought_sent = True
+            #  EVENT 1: Reasoning Plan - Check FIRST
+            if ("Reasoning Plan" in self.buffer and
+                    not self.reasoning_sent):
 
-            # Send TOOL START in real-time (STEP 3)
-            if ("Using Tool:" in text or "Executing Tool:" in text) and not self.last_tool_start_sent:
-                self.event_queue.append({
-                    "type": "step_3",
-                    "content": "🔧 STEP 3: Tool Execution Started\n⏳ Executing financial_screening_tool..."
-                })
-                self.last_tool_start_sent = True
+                # Look for the entire reasoning block
+                reasoning_match = re.search(
+                    r'Reasoning Plan(.*?)(?=Agent:|$)',
+                    self.buffer,
+                    re.DOTALL
+                )
 
-            # Send TOOL COMPLETED in real-time (STEP 4)
-            if ("Tool Result:" in text or "Tool Output:" in text) and not self.last_tool_end_sent:
-                self.event_queue.append({
-                    "type": "step_4",
-                    "content": "✅ STEP 4: Tool Completed\n📊 Tool executed successfully"
-                })
-                self.last_tool_end_sent = True
+                if reasoning_match and not self.reasoning_sent:
+                    reasoning_text = "Reasoning Plan" + reasoning_match.group(1)
+                    reasoning_text = self._clean_text(reasoning_text)
+                    # Optional: keep a tiny sanity check to avoid emitting empty strings
+                    if len(reasoning_text) >= 20:
+                        self._send_event_safe(self.callback.on_reasoning_plan(reasoning_text))
+                        self.reasoning_sent = True
+
+            #  EVENT 2: Agent Thinking - Check SECOND (after reasoning)
+            flags = re.IGNORECASE
+            if (self.reasoning_sent and
+                    "Agent:" in self.buffer and
+                    "Thought:" in self.buffer and
+                    not self.thought_sent):
+
+                agent_match = re.search(r'Agent:\s*([^\n]+)', self.buffer, flags)
+                thought_match = re.search(r'Thought:\s*([^\n]+)', self.buffer, flags)
+                action_match = re.search(r'Action:\s*([^\n]+)', self.buffer, flags)  # optional
+                using_match = re.search(r'Using\s*Tool:?\s*([^\n]+)', self.buffer, flags)  # optional
+
+                if agent_match and thought_match:
+                    agent = self._clean_text(agent_match.group(1))
+                    thought = self._clean_text(thought_match.group(1))
+                    action = self._clean_text(action_match.group(1)) if action_match else None
+                    using_tool = self._clean_text(using_match.group(1)) if using_match else None
+
+                    parts = [f"Agent: {agent}", "", f"Thought: {thought}"]
+                    if action:
+                        parts += ["", f"Action: {action}"]
+                    if using_tool:
+                        parts += ["", f"Using Tool: {using_tool}"]
+
+                    thinking_msg = "\n".join(parts)
+                    self._send_event_safe(self.callback.on_agent_thinking(thinking_msg))
+                    self.thought_sent = True
+                    self.original_stdout.write(f"\n✓ [EVENT 2] Agent thinking sent\n")
+                    self.original_stdout.flush()
+
+            #  EVENT 3: Tool Start - Check THIRD (after thinking)
+            if (self.thought_sent and
+                    (
+                            "Tool Screening" in self.buffer or "🛠️" in self.buffer or "financial_screening_tool" in self.buffer) and
+                    not self.tool_start_sent):
+                self._send_event_safe(self.callback.on_tool_start("financial_screening_tool"))
+                self.tool_start_sent = True
+                self.original_stdout.write(f"\n✓ [EVENT 3] Tool start sent\n")
+                self.original_stdout.flush()
+
+            #  EVENT 4: Tool End - Check LAST (after tool starts)
+            if (self.tool_start_sent and
+                    ("Tool Result:" in self.buffer or "companies passed" in self.buffer.lower()) and
+                    not self.tool_end_sent):
+                # Try to extract count
+                result_match = re.search(r'(\d+)\s*companies?\s*passed', self.buffer, re.IGNORECASE)
+                count = result_match.group(1) if result_match else "0"
+
+                self._send_event_safe(self.callback.on_tool_end(
+                    "financial_screening_tool",
+                    f"{count} companies passed screening"
+                ))
+                self.tool_end_sent = True
+                self.original_stdout.write(f"\n✓ [EVENT 4] Tool end sent\n")
+                self.original_stdout.flush()
 
         except Exception as e:
-            raise
+            self.original_stdout.write(f"\n⚠️ Event capture error: {e}\n")
+            self.original_stdout.flush()
 
+    def _send_event_safe(self, coro):
+        """Safely send coroutine to event loop from thread"""
+        try:
+            if self.loop and self.loop.is_running():
+                asyncio.run_coroutine_threadsafe(coro, self.loop)
+        except Exception as e:
+            self.original_stdout.write(f"\n⚠️ Send error: {e}\n")
+            self.original_stdout.flush()
 
     def flush(self) -> None:
-        """Flush method for compatibility"""
         self.original_stdout.flush()
 
+    def get_buffer(self) -> str:
+        return self.buffer
 
-# ============================================================================
-# ENHANCED WEBSOCKET STREAMING CALLBACK - ALL 7 STEPS
-# ============================================================================
 
 class WebSocketStreamingCallback:
-    """Custom callback to stream agent events to WebSocket - ALL 7 STEPS"""
+    """Stream events to WebSocket with content cleaning"""
 
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
         self.step_count = 0
 
+    def _clean_content(self, content: str) -> str:
+        """Remove non-ASCII, ANSI codes, and special Unicode characters"""
+        # Remove ANSI escape sequences (color codes, formatting)
+        ansi_escape_pattern = r'\x1b\[[0-9;]*m|\[0m|\[32m|\[37m'
+        cleaned = re.sub(ansi_escape_pattern, '', content)
+
+        # Replace common problematic characters
+        cleaned = cleaned.replace('\xa0', ' ')  # Non-breaking space
+        cleaned = cleaned.replace('\u200b', '')  # Zero-width space
+        cleaned = cleaned.replace('\r', '')  # Carriage return
+        cleaned = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', cleaned)
+        cleaned = re.sub(r'[^\x20-\x7E\n]', '', cleaned)
+        cleaned = re.sub(r'  +', ' ', cleaned)
+        cleaned = re.sub(r'\n\n+', '\n', cleaned)
+
+        return cleaned.strip()
+
     async def send_event(self, event_type: str, content: str) -> None:
         """Send event to WebSocket"""
         try:
             self.step_count += 1
-            await self.websocket.send_json({
+            # Clean content
+            cleaned_content = self._clean_content(content)
+
+            message = {
                 "type": event_type,
-                "content": content,
+                "content": cleaned_content,
                 "step": self.step_count
-            })
-            await asyncio.sleep(0.1)
+            }
+            print(f"\n[STEP {self.step_count}] Sending: {event_type}")
+            await self.websocket.send_json(message)
+            await asyncio.sleep(0.3)
         except Exception as e:
-            print(f"WebSocket send error: {e}")
+            print(f"WebSocket error: {e}")
 
-    # STEP 1
     async def on_agent_initialized(self) -> None:
-        """STEP 1: Called when agent starts"""
-        await self.send_event("step_1", "✅ STEP 1: Agent Initialized\n🤖 Financial Screening Specialist agent is ready")
+        content = """STEP 1: Agent Initialized
 
-    # STEP 2
+ Bottom-Up Fundamental Analysis agent is ready
+Initializing screening process..."""
+        await self.send_event("step_1", content)
+
+    async def on_reasoning_plan(self, plan: str) -> None:
+        content = f"""STEP 2A: Reasoning Plan
+
+{plan}"""
+        await self.send_event("step_2a", content)
+
     async def on_agent_thinking(self, thought: str) -> None:
-        """STEP 2: Called for agent thinking steps"""
-        await self.send_event("step_2", f"💭 STEP 2: Agent Thinking\n\n{thought}")
+        content = f"""STEP 2B: Bottom-Up Fundamental Analysis Agent Thinking
 
-    # STEP 3
+{thought}"""
+        await self.send_event("step_2b", content)
+
     async def on_tool_start(self, tool_name: str) -> None:
-        """STEP 3: Called when tool starts"""
-        await self.send_event("step_3", f"🔧 STEP 3: Tool Execution Started\n⏳ Executing {tool_name}...")
+        content = f"""STEP 3: Tool Execution Started
 
-    # STEP 4
+Executing {tool_name}...
+Screening companies against mandate parameters..."""
+        await self.send_event("step_3", content)
+
     async def on_tool_end(self, tool_name: str, output: str) -> None:
-        """STEP 4: Called when tool finishes"""
-        await self.send_event("step_4", f"✅ STEP 4: Tool Completed\n📊 {tool_name} executed successfully")
+        content = f"""STEP 4: Tool Completed
 
-    # STEP 5
+{tool_name} executed successfully
+Result: {output}"""
+        await self.send_event("step_4", content)
+
     async def on_screening_progress(self, message: str) -> None:
-        """STEP 5: Called during screening progress"""
-        await self.send_event("step_5", f"⚙️ STEP 5: Results Processing\n\n{message}")
+        content = f"""STEP 5: Results Processing
 
-    # STEP 6
+{message}"""
+        await self.send_event("step_5", content)
+
     async def on_agent_finish(self, result: str) -> None:
-        """STEP 6: Called when agent finishes"""
-        await self.send_event("step_6", f"✨ STEP 6: Agent Task Completed\n\n{result}")
+        content = f"""STEP 6: Bottom-Up Fundamental Analysis Agent Task Completed
 
-    # STEP 7
+{result}"""
+        await self.send_event("step_6", content)
+
     async def on_final_output(self, output: str) -> None:
-        """STEP 7: Called with final output"""
-        await self.send_event("step_7", f"📋 STEP 7: Final Output Ready\n\n{output}")
+        content = f"""STEP 7: Final Output Ready
+
+{output}"""
+        await self.send_event("step_7", content)
 
     async def on_error(self, error: str) -> None:
-        """Called on error"""
-        await self.send_event("error", f"⚠️ Error: {error}")
+        await self.send_event("error", f"Error: {error}")
 
 
 # ============================================================================
-# HELPER FUNCTIONS FOR SCREENING - IMPROVED VERSION
+# HELPER FUNCTIONS FOR SCREENING
 # ============================================================================
 def parse_constraint(constraint_str: str) -> tuple:
     """Parse constraint - handles both formats"""
@@ -258,7 +352,7 @@ def parse_constraint(constraint_str: str) -> tuple:
 
         return ">", 0
     except Exception as e:
-        print(f"❌ Error parsing constraint '{constraint_str}': {e}")
+        print(f"Error parsing constraint '{constraint_str}': {e}")
         return ">", 0
 
 
@@ -446,7 +540,7 @@ def screen_companies_simple(mandate_parameters: dict, companies: list) -> list:
 
                     if company_value is None:
                         all_passed = False
-                        reasons.append(f"{param_name}: N/A ❌")
+                        reasons.append(f"{param_name}: N/A ")
                         break
 
                     if compare_values(company_value, operator, threshold):
@@ -477,38 +571,38 @@ def screen_companies_simple(mandate_parameters: dict, companies: list) -> list:
 
 
 # ============================================================================
-# CUSTOM TOOL: Financial Screening - FIXED
+# CUSTOM TOOL: Financial Screening - NO REASONING
 # ============================================================================
 
 class FinancialScreeningTool(BaseTool):
-    """Validates companies against mandate parameters"""
+    """Validates companies against mandate parameters - returns ONLY passed companies"""
     name: str = "financial_screening_tool"
-    description: str = """Screen companies against mandate parameters and return only those that pass ALL criteria."""
+    description: str = """Screen companies against mandate parameters and return only those that pass ALL criteria.
+    Tool returns ONLY the filtered results - Agent will provide analysis and reasoning."""
 
     def _run(self, mandate_parameters: dict, companies: list) -> str:
-        """Screen companies and return passed ones"""
+        """Screen companies and return passed ones WITHOUT reasoning"""
         try:
-            print(f"\n🔍 Tool Screening {len(companies)} companies against {len(mandate_parameters)} criteria...")
+            print(f"\nTool Screening {len(companies)} companies against {len(mandate_parameters)} criteria...")
 
             if not mandate_parameters or not companies:
                 return json.dumps({"company_details": []})
 
             passed_companies = screen_companies_simple(mandate_parameters, companies)
-            print(f"✅ Tool Result: {len(passed_companies)} companies passed")
+            print(f"Tool Result: {len(passed_companies)} companies passed")
 
             company_details_list = []
             for company in passed_companies:
                 company_data = company["company_details"].copy()
                 company_data["status"] = "Pass"
-                company_data["reason"] = company.get("reason", "Meets all criteria")
                 company_details_list.append(company_data)
 
             formatted_response = {"company_details": company_details_list}
-            print(f"📊 Tool Output: {len(company_details_list)} qualified companies")
+            print(f"Tool Output: {len(company_details_list)} qualified companies")
             return json.dumps(formatted_response, default=str)
 
         except Exception as e:
-            print(f"❌ Tool Error: {str(e)}")
+            print(f"Tool Error: {str(e)}")
             import traceback
             traceback.print_exc()
             return json.dumps({"company_details": []})
@@ -531,7 +625,8 @@ try:
 
     financial_screening_agent = Agent(
         role="Financial Screening Specialist",
-        goal="""Evaluate companies against fund mandate parameters.
+        goal="""This agent executes the 'Bottom-Up Fundamental Analysis' sub-process as part of the 'Research and Idea Generation process' under the 'Fund Mandate capability'. It focuses on 'granular', 'company-specific evaluation', 'including financial statement analysis', 'earnings modeling', and 'intrinsic valuation'. Use this agent for deep dives into individual securities to determine if they meet the specific criteria of the investment mandate.
+        Evaluate companies against fund mandate parameters.
         Use financial_screening_tool to validate each company.
         Return ONLY valid JSON output with screening results.""",
         backstory="""You are an expert financial analyst specializing in investment screening.
@@ -541,6 +636,7 @@ try:
         llm=azure_llm,
         tools=[FinancialScreeningTool()],
         verbose=True,
+        reasoning=True,
         allow_delegation=False
     )
 except Exception as e:
@@ -553,7 +649,9 @@ except Exception as e:
 
 try:
     screen_companies_task = Task(
-        description="""Screen companies against fund mandate parameters.
+        description="""
+        This agent executes the Bottom-Up Fundamental Analysis sub-process as part of the Research and Idea Generation process under the Fund Mandate capability. It focuses on granular, company-specific evaluation, including financial statement analysis, earnings modeling, and intrinsic valuation. Use this agent for deep dives into individual securities to determine if they meet the specific criteria of the investment mandate.
+        Screen companies against fund mandate parameters.
 
         Mandate Parameters:
         {mandate_parameters}
@@ -615,7 +713,88 @@ except Exception as e:
 
 
 # ============================================================================
-# REAL-TIME WEBSOCKET SCREENING FUNCTION
+# RIGID JSON PARSING - HANDLES BACKTICKS & MARKDOWN
+# ============================================================================
+
+def extract_and_parse_json(result_text: str) -> dict:
+    """
+    RIGID JSON PARSING - Handles all formats including backticks
+    """
+    print(f"\n📝 RIGID JSON PARSING STARTED")
+    print(f"Result length: {len(result_text)} chars\n")
+
+    # Strategy 1: Remove markdown backticks first
+    print("Strategy 1: Removing markdown backticks...")
+    cleaned_text = result_text.strip()
+
+    # Remove ``` json ... ``` wrappers
+    if cleaned_text.startswith('```'):
+        cleaned_text = re.sub(r'^```(?:json)?\s*', '', cleaned_text)
+        cleaned_text = re.sub(r'```\s*$', '', cleaned_text)
+        cleaned_text = cleaned_text.strip()
+        print("✓ Removed markdown backticks")
+
+    # Strategy 2: Direct JSON parse
+    print("Strategy 2: Direct JSON parse...")
+    try:
+        raw_parsed = json.loads(cleaned_text)
+        if "company_details" in raw_parsed and isinstance(raw_parsed.get("company_details"), list):
+            print(f"SUCCESS: Direct JSON parse - {len(raw_parsed['company_details'])} companies\n")
+            return raw_parsed
+    except json.JSONDecodeError as e:
+        print(f"Direct JSON failed: {e}\n")
+
+    # Strategy 3: Extract JSON between braces
+    print("Strategy 3: Extracting JSON between braces...")
+    start = cleaned_text.find('{')
+    end = cleaned_text.rfind('}') + 1
+
+    if start != -1 and end > start:
+        json_str = cleaned_text[start:end]
+        try:
+            raw_parsed = json.loads(json_str)
+            if "company_details" in raw_parsed and isinstance(raw_parsed.get("company_details"), list):
+                print(f"SUCCESS: Brace extraction - {len(raw_parsed['company_details'])} companies\n")
+                return raw_parsed
+        except json.JSONDecodeError as e:
+            print(f"Brace extraction failed: {e}\n")
+
+    # Strategy 4: Look for JSON array
+    print("Strategy 4: Extracting JSON array...")
+    json_array_match = re.search(r'\[\s*\{.*?\}\s*\]', cleaned_text, re.DOTALL)
+    if json_array_match:
+        try:
+            json_str = json_array_match.group(0)
+            companies_array = json.loads(json_str)
+            if isinstance(companies_array, list) and len(companies_array) > 0:
+                print(f"SUCCESS: Array extraction - {len(companies_array)} companies\n")
+                return {"company_details": companies_array}
+        except json.JSONDecodeError as e:
+            print(f"Array extraction failed: {e}\n")
+
+    # Strategy 5: Remove common problematic characters
+    print("Strategy 5: Cleaning problematic characters...")
+    cleaned_text = cleaned_text.replace('\n', ' ').replace('\\', '')
+
+    start = cleaned_text.find('{')
+    end = cleaned_text.rfind('}') + 1
+
+    if start != -1 and end > start:
+        json_str = cleaned_text[start:end]
+        try:
+            raw_parsed = json.loads(json_str)
+            if "company_details" in raw_parsed:
+                print(f"SUCCESS: Cleaned extraction - {len(raw_parsed['company_details'])} companies\n")
+                return raw_parsed
+        except json.JSONDecodeError as e:
+            print(f"Cleaned extraction failed: {e}\n")
+
+    print("All parsing strategies failed\n")
+    return {"company_details": []}
+
+
+# ============================================================================
+# UPDATED WEBSOCKET SCREENING FUNCTION
 # ============================================================================
 
 async def run_screening_with_websocket(
@@ -623,34 +802,32 @@ async def run_screening_with_websocket(
         mandate_parameters: dict,
         companies: list
 ) -> dict:
-    """Run screening with REAL-TIME streaming and return company_details"""
+    """Run screening with REAL-TIME streaming"""
 
     try:
-        print("\n" + "=" * 80)
-        print("🚀 STARTING SCREENING WORKFLOW")
-        print("=" * 80 + "\n")
 
         callback = WebSocketStreamingCallback(websocket)
-        event_queue = []
 
-        # STEP 1: Agent Initialized
+        # STEP 1
         await callback.on_agent_initialized()
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.5)
 
         if not screening_crew:
-            print("❌ Screening crew not initialized!")
             await callback.on_error("Screening crew not initialized")
             return {"company_details": []}
 
-        # REDIRECT STDOUT FOR REAL-TIME CAPTURE
+        # Get current event loop
+        current_loop = asyncio.get_event_loop()
+
+        # Setup REAL-TIME event capture with loop reference
         original_stdout = sys.stdout
-        streaming_writer = RealtimeStreamingWriter(websocket, original_stdout, event_queue)
-        sys.stdout = streaming_writer
+        event_capture = RealtimeEventCapture(original_stdout, callback, current_loop)
+        sys.stdout = event_capture
 
         try:
-            print("📋 Executing crew with inputs...")
+            print("Executing crew with real-time event streaming...\n")
 
-            # Execute crew in thread
+            # Execute crew
             result = await asyncio.to_thread(
                 screening_crew.kickoff,
                 inputs={
@@ -659,131 +836,38 @@ async def run_screening_with_websocket(
                 }
             )
 
-            print(f"\n✅ Crew execution complete!")
-            print(f"Result type: {type(result)}")
+            print(f"\nCrew execution complete!")
 
         finally:
-            # Restore stdout
             sys.stdout = original_stdout
 
-        # Process queued events (STEP 2, 3, 4)
-        for event in event_queue:
-            await callback.send_event(event["type"], event["content"])
-            await asyncio.sleep(0.5)
+        # Give time for async events to complete
+        await asyncio.sleep(1.5)
 
-        result_text = str(result).strip()
-
-        print(f"\n📝 Processing result...")
-        print(f"Result length: {len(result_text)} characters")
-        print(f"First 300 chars: {result_text[:300]}\n")
-
-        # STEP 5: Results Processed
-        await asyncio.sleep(0.5)
+        # STEP 5: Results Processing
         num_companies = len(companies)
         await callback.on_screening_progress(
             f"Total companies evaluated: {num_companies}\n"
             f"Screening criteria applied: {len(mandate_parameters)}"
         )
 
-        # Parse result - IMPROVED JSON EXTRACTION
-        parsed_result = {"company_details": []}
-
-        try:
-            # Strategy 1: Try direct JSON parsing first
-            try:
-                raw_parsed = json.loads(result_text)
-                if "company_details" in raw_parsed and isinstance(raw_parsed.get("company_details"), list):
-                    parsed_result = raw_parsed
-                    print(f"✅ Strategy 1 SUCCESS: Direct JSON parsing")
-                    print(f"   Found {len(parsed_result['company_details'])} companies\n")
-            except json.JSONDecodeError:
-                print(f"⚠️ Strategy 1 FAILED: Not valid JSON at root\n")
-
-            # Strategy 2: Extract JSON from wrapped text
-            if not parsed_result["company_details"]:
-                print(f"Trying Strategy 2: Extract JSON from text...\n")
-
-                # Find all potential JSON objects
-                json_matches = re.findall(
-                    r'\{[^{}]*"company_details"[^{}]*\}',
-                    result_text,
-                    re.DOTALL
-                )
-
-                if json_matches:
-                    print(f"Found {len(json_matches)} JSON matches")
-
-                    # Try the longest match first (most complete)
-                    for json_str in sorted(json_matches, key=len, reverse=True):
-                        try:
-                            raw_parsed = json.loads(json_str)
-                            if "company_details" in raw_parsed and isinstance(raw_parsed.get("company_details"), list):
-                                parsed_result = raw_parsed
-                                print(f"✅ Strategy 2 SUCCESS: Regex extraction")
-                                print(f"   Found {len(parsed_result['company_details'])} companies\n")
-                                break
-                        except json.JSONDecodeError:
-                            continue
-
-            # Strategy 3: Extract between first { and last }
-            if not parsed_result["company_details"]:
-                print(f"Trying Strategy 3: Extract between braces...\n")
-
-                start_idx = result_text.find('{')
-                end_idx = result_text.rfind('}') + 1
-
-                if start_idx != -1 and end_idx > start_idx:
-                    json_str = result_text[start_idx:end_idx]
-                    print(f"Extracted substring length: {len(json_str)}")
-
-                    try:
-                        raw_parsed = json.loads(json_str)
-                        if "company_details" in raw_parsed and isinstance(raw_parsed.get("company_details"), list):
-                            parsed_result = raw_parsed
-                            print(f"✅ Strategy 3 SUCCESS: Brace extraction")
-                            print(f"   Found {len(parsed_result['company_details'])} companies\n")
-                    except json.JSONDecodeError as e:
-                        print(f"⚠️ Strategy 3 FAILED: JSON decode error: {e}\n")
-
-                        # Try cleaning the string
-                        json_str_clean = json_str.replace('\n', ' ').replace('\\', '')
-                        try:
-                            raw_parsed = json.loads(json_str_clean)
-                            if "company_details" in raw_parsed:
-                                parsed_result = raw_parsed
-                                print(f"✅ Strategy 3 SUCCESS (after cleaning)")
-                                print(f"   Found {len(parsed_result['company_details'])} companies\n")
-                        except:
-                            pass
-
-        except Exception as e:
-            print(f"❌ Error during result parsing: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # Log final parsing result
+        parsed_result = extract_and_parse_json(str(result).strip())
         num_qualified = len(parsed_result.get("company_details", []))
-        print(f"\n{'=' * 80}")
-        print(f"📊 FINAL RESULT: {num_qualified} qualified companies")
-        print(f"{'=' * 80}\n")
 
-        # STEP 6: Agent Finish
         await asyncio.sleep(0.5)
         await callback.on_agent_finish(
-            f"Screening analysis complete.\n"
-            f"Companies qualified: {num_qualified}"
+            f"Screening analysis complete.\nCompanies qualified: {num_qualified}"
         )
 
-        # STEP 7: Final Output
+        # STEP 7
         await asyncio.sleep(0.5)
         final_json = json.dumps(parsed_result, indent=2, default=str)
         await callback.on_final_output(final_json[:1000])
 
-        print(f"\n✅ Returning parsed result with {num_qualified} companies")
         return parsed_result
 
     except Exception as e:
-        print(f"❌ Error in run_screening_with_websocket: {e}")
+        print(f"Error: {e}")
         import traceback
         traceback.print_exc()
         await callback.on_error(str(e))

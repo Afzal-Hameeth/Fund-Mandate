@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useLocation, NavLink } from 'react-router-dom';
 import { FiLayers, FiChevronLeft, FiChevronRight, FiFileText, FiSearch, FiCompass } from 'react-icons/fi';
@@ -11,7 +10,6 @@ const Sidebar: React.FC = () => {
     { label: 'Agent Chat', path: '/', icon: FiLayers },
     { label: 'Mandate Processing', path: '/fund-mandate', icon: FiFileText },
     { label: 'Fund Mandate', path: '/sourcing-agent', icon: FiSearch },
-    // { label: 'Research', path: '/research', icon: FiCompass },
   ];
 
   return (

@@ -1,23 +1,16 @@
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from agents.risk_agent import run_risk_assessment_sync
 import json
-import sys
-import re
-import traceback
-from io import StringIO
-from datetime import datetime
-import os
-import asyncio
 import queue
 import threading
-from typing import Callable, List, Dict, Any, AsyncGenerator
+import asyncio
+from datetime import datetime
+from typing import List, Dict, Any
 from pydantic import BaseModel, ConfigDict
 
 
-# Request/Response Models
 class RiskAnalysisRequest(BaseModel):
-    """Risk Analysis Request - Input format from frontend"""
+    """Request model for risk analysis"""
     companies: List[Dict[str, Any]]
     risk_parameters: Dict[str, str]
 
@@ -27,9 +20,6 @@ class RiskAnalysisRequest(BaseModel):
                 "companies": [
                     {
                         "Company ": "TestCorp",
-                        "Debt / Equity": 0.5,
-                        "P/E Ratio": 20,
-                        "Return on Equity": 0.15,
                         "Risks": {
                             "Competitive Position": "Strong",
                             "Governance Quality": "Good",
@@ -53,119 +43,45 @@ class RiskAnalysisRequest(BaseModel):
     )
 
 
-class RiskAnalysisResponse(BaseModel):
-    """Risk Analysis Response"""
-    timestamp: str
-    status: str
-    summary: Dict[str, Any]
-    analysis: List[Dict[str, Any]]
-    saved_file: str
-
-
 router = APIRouter(prefix="/risk", tags=["risk-analysis"])
 
 
-def save_analysis_result(result: Dict[str, Any]) -> str:
-    """Save analysis result to JSON file"""
-    try:
-        filename = f"risk_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-
-        with open(filename, 'w') as f:
-            json.dump(result, f, indent=2)
-
-        print(f"✅ Results saved to {filename}")
-        return filename
-    except Exception as e:
-        print(f"❌ Error saving results: {str(e)}")
-        return ""
-
+# ============================================================================
+# WEBSOCKET ENDPOINT FOR REAL-TIME ANALYSIS STREAMING
+# ============================================================================
 
 @router.websocket("/analyze")
 async def websocket_analyze(websocket: WebSocket):
     """
-    ✨ REAL-TIME STREAMING WebSocket ENDPOINT for Risk Analysis ✨
+    Real-time WebSocket endpoint for Risk Assessment of Investment Ideas.
 
-    Single unified endpoint that:
-    1. Receives analysis request
-    2. Streams events in REAL-TIME as analysis progresses
-    3. Returns final JSON results with company verdicts
+    Receives analysis request and streams all events in real-time:
+    - session_start: Analysis session initialized
+    - analysis_start: Company analysis started
+    - thinking_token: Real-time LLM thinking (streamed as generated)
+    - thinking_session_start/end: Thinking block markers
+    - parameter_analysis: Individual parameter verdicts
+    - analysis_complete: Complete analysis with JSON results
+    - session_complete: All companies analyzed with final results
 
-    ⚡ STREAMING FLOW ⚡
-    1. Frontend connects: ws://server/risk/analyze
-    2. Frontend sends: {"companies": [...], "risk_parameters": {...}}
-    3. Server IMMEDIATELY streams events:
-       - session_start: Analysis starting
-       - analysis_start: Starting company analysis
-       - llm_thinking: LLM processing (real-time)
-       - analysis_complete: Company verdict ready
-       - session_complete: All done + final JSON results
-
-    ✅ Each event is sent as soon as it's generated - NO DELAYS!
-
-    Example streaming sequence:
-
-    Event 1:
-    {
-        "type": "session_start",
-        "message": "🚀 Starting analysis for 2 companies..."
-    }
-
-    Event 2:
-    {
-        "type": "analysis_start",
-        "company": "TestCorp",
-        "message": "🔍 Analyzing TestCorp..."
-    }
-
-    Event 3:
-    {
-        "type": "llm_thinking",
-        "company": "TestCorp",
-        "message": "🧠 LLM analyzing risks for TestCorp..."
-    }
-
-    Event 4:
-    {
-        "type": "analysis_complete",
-        "company_name": "TestCorp",
-        "overall_status": "UNSAFE",
-        "reason": "TestCorp's strong competitive position...",
-        "message": "✅ Analysis complete for TestCorp"
-    }
-
-    ... (repeat for each company) ...
-
-    Final Event:
-    {
-        "type": "session_complete",
-        "status": "success",
-        "message": "✅ Analysis completed for 2 companies",
-        "results": [
-            {
-                "company_name": "TestCorp",
-                "overall_status": "UNSAFE",
-                "reason": "..."
-            },
-            {
-                "company_name": "FinanceHub Ltd",
-                "overall_status": "UNSAFE",
-                "reason": "..."
-            }
-        ]
-    }
+    WebSocket Communication Flow:
+    1. Client connects to ws://server/risk/analyze
+    2. Client sends: {"companies": [...], "risk_parameters": {...}}
+    3. Server processes in background thread
+    4. Server streams events as they occur
+    5. Client receives thinking tokens in real-time as they are generated
+    6. Session ends with final results summary
     """
     await websocket.accept()
 
     try:
-        # Receive the analysis request from frontend
         data_json = await websocket.receive_text()
         data = RiskAnalysisRequest(**json.loads(data_json))
 
-        # Create a queue to receive events from the analysis thread
         event_queue = queue.Queue()
 
-        # Function to run analysis in a separate thread
         def run_analysis_thread():
+            """Runs analysis in background thread to allow async streaming"""
             try:
                 run_risk_assessment_sync(
                     {
@@ -182,50 +98,43 @@ async def websocket_analyze(websocket: WebSocket):
                 })
                 event_queue.put(None)
 
-        # Start analysis in background thread
         analysis_thread = threading.Thread(target=run_analysis_thread, daemon=True)
         analysis_thread.start()
 
-        # Stream events from queue to WebSocket in REAL-TIME
-        print("🔄 Starting real-time event streaming...")
+        print("Starting real-time event streaming to client...")
         while True:
             try:
-                # Get event from queue with timeout
                 event = event_queue.get(timeout=0.1)
 
                 if event is None:
-                    # Sentinel - end of stream
-                    print("✅ All events sent, stream complete")
+                    print("Stream complete - all events sent")
                     break
 
-                # Send event to frontend IMMEDIATELY
                 await websocket.send_json(event)
-                print(f"📤 Sent event: {event.get('type')}")
+                print(f"Streamed: {event.get('type')} - {event.get('company_name', event.get('message', ''))}")
 
-                # Small delay to allow client to process
                 await asyncio.sleep(0.02)
 
             except queue.Empty:
-                # No event ready yet, continue checking
                 continue
             except Exception as e:
-                print(f"❌ Error sending event: {e}")
+                print(f"Error sending event: {e}")
                 break
 
     except WebSocketDisconnect:
-        print("🔌 WebSocket disconnected")
+        print("Client disconnected")
     except json.JSONDecodeError as e:
         try:
             await websocket.send_json({
                 "type": "error",
-                "message": f"Invalid JSON format: {str(e)}",
+                "message": f"Invalid JSON: {str(e)}",
                 "timestamp": datetime.now().isoformat()
             })
         except:
             pass
         await websocket.close()
     except Exception as e:
-        print(f"❌ WebSocket Error: {str(e)}")
+        print(f"WebSocket error: {str(e)}")
         try:
             await websocket.send_json({
                 "type": "error",
@@ -237,44 +146,27 @@ async def websocket_analyze(websocket: WebSocket):
         await websocket.close()
 
 
+# ============================================================================
+# HTTP ENDPOINT FOR ANALYSIS WITHOUT STREAMING
+# ============================================================================
+
 @router.post("/analyze-http")
 async def http_analyze(request: RiskAnalysisRequest):
     """
-    ✅ HTTP POST ENDPOINT (Alternative to WebSocket)
+    HTTP POST endpoint for analysis without real-time streaming.
+    Returns all results at once after analysis completes.
 
-    For clients that cannot use WebSocket, provides HTTP endpoint.
-    Returns all results as JSON immediately (no streaming).
-
-    Request:
-    POST /risk/analyze-http
-    {
-        "companies": [...],
-        "risk_parameters": {...}
-    }
-
-    Response:
-    {
-        "status": "success",
-        "timestamp": "2026-01-20T...",
-        "results": [
-            {
-                "company_name": "TestCorp",
-                "overall_status": "UNSAFE",
-                "reason": "..."
-            },
-            ...
-        ]
-    }
+    Use this endpoint if WebSocket is not available.
+    Results are returned as JSON after processing completes.
     """
     try:
-        # Run analysis without streaming
         results = await asyncio.to_thread(
             run_risk_assessment_sync,
             {
                 "companies": request.companies,
                 "risk_parameters": request.risk_parameters
             },
-            None  # No event queue
+            None
         )
 
         return {
@@ -285,12 +177,8 @@ async def http_analyze(request: RiskAnalysisRequest):
         }
 
     except Exception as e:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "status": "error",
-                "message": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
-        )
-
+        return {
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
