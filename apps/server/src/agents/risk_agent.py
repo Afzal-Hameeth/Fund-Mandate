@@ -35,20 +35,19 @@ GPT5_API_KEY = secrets_map.get("llm-api-key")
 
 
 # ============================================================================
-# STREAMING CALLBACK FOR REAL-TIME LLM THINKING TOKENS
+# CLEAN EVENT STREAMING CALLBACK - MEANINGFUL THOUGHTS ONLY
 # ============================================================================
 
-class StreamingTokenCallback(BaseCallbackHandler):
+class CleanEventCallback(BaseCallbackHandler):
     """
-    Captures LLM tokens and emits them as meaningful thought chunks.
-    Only emits complete thoughts/sentences to avoid fragmentary output.
+    Emits meaningful agent thinking and tool invocations without noise.
+    Only sends substantial thoughts and tool usage events.
     """
 
-    def __init__(self, event_queue=None, company_name=None):
-        self.buffer = ""
+    def __init__(self, event_queue=None):
         self.event_queue = event_queue
+        self.buffer = ""
         self.token_count = 0
-        self.company_name = company_name
         self.sentence_endings = {'.', '!', '?'}
         self.semantic_pauses = {',', ':', ';'}
 
@@ -65,7 +64,7 @@ class StreamingTokenCallback(BaseCallbackHandler):
             if pattern in text_lower:
                 return False
 
-        # Filter out JSON structure (should be in analysis_complete event, not thinking)
+        # Filter out JSON structure
         json_char_count = sum(1 for c in text if c in '{}[]:,"')
         total_chars = len(text.strip())
         json_ratio = json_char_count / total_chars if total_chars > 0 else 0
@@ -83,7 +82,7 @@ class StreamingTokenCallback(BaseCallbackHandler):
         return True
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
-        """Buffers tokens and emits only when complete thoughts are formed"""
+        """Buffers tokens and emits meaningful complete thoughts"""
         self.buffer += token
         self.token_count += 1
 
@@ -92,53 +91,62 @@ class StreamingTokenCallback(BaseCallbackHandler):
 
         should_emit = False
 
-        if has_sentence_ending:
+        if has_sentence_ending and self.token_count >= 50:
             should_emit = True
-        elif has_semantic_pause and len(self.buffer.strip()) > 20:
+        elif has_semantic_pause and len(self.buffer.strip()) > 50 and self.token_count >= 50:
             should_emit = True
-        elif self.token_count >= 50:
-            if self.buffer.strip() and len(self.buffer.strip()) > 15:
+        elif self.token_count >= 75:
+            if self.buffer.strip() and len(self.buffer.strip()) > 50:
                 should_emit = True
 
         if should_emit:
             content = self.buffer.strip()
             if content and self.is_meaningful_content(content):
                 if self.event_queue:
-                    thinking_event = {
-                        "type": "thinking_token",
+                    self.event_queue.put({
+                        "type": "agent_thinking",
                         "content": content,
-                        "subprocess": "Risk Assessment of Investment Ideas",
                         "timestamp": datetime.now().isoformat()
-                    }
-                    if self.company_name:
-                        thinking_event["company_name"] = self.company_name
-
-                    self.event_queue.put(thinking_event)
-                print(content, end="", flush=True)
+                    })
             self.buffer = ""
             self.token_count = 0
 
     def on_llm_end(self, response, **kwargs) -> None:
-        """Flushes remaining content when LLM completes"""
+        """Flushes remaining meaningful content"""
         content = self.buffer.strip()
         if content and self.is_meaningful_content(content):
             if self.event_queue:
-                thinking_event = {
-                    "type": "thinking_token",
+                self.event_queue.put({
+                    "type": "agent_thinking",
                     "content": content,
-                    "subprocess": "Risk Assessment of Investment Ideas",
                     "timestamp": datetime.now().isoformat()
-                }
-                if self.company_name:
-                    thinking_event["company_name"] = self.company_name
-
-                self.event_queue.put(thinking_event)
-            print(content, end="", flush=True)
+                })
         self.buffer = ""
         self.token_count = 0
 
+    def on_agent_action(self, action, **kwargs):
+        """Capture agent's tool selection"""
+        if self.event_queue:
+            self.event_queue.put({
+                "type": "agent_thinking",
+                "content": f"Using tool: {action.tool}",
+                "timestamp": datetime.now().isoformat()
+            })
 
-def get_azure_llm(event_queue=None, company_name=None):
+    def on_tool_start(self, serialized: dict, input_str: str, **kwargs):
+        """Tool is about to execute - stream immediately for progress"""
+        tool_name = serialized.get("name", "unknown")
+        print(f"\n[DEBUG] Tool starting: {tool_name}", flush=True)
+        if self.event_queue:
+            self.event_queue.put({
+                "type": "tool_invocation",
+                "tool": tool_name,
+                "message": f"Invoking {tool_name}...",
+                "timestamp": datetime.now().isoformat()
+            })
+
+
+def get_azure_llm(event_queue=None):
     """Initializes Azure OpenAI LLM with streaming enabled"""
     try:
         return AzureChatOpenAI(
@@ -148,14 +156,20 @@ def get_azure_llm(event_queue=None, company_name=None):
             api_key=GPT5_API_KEY,
             temperature=1,
             streaming=True,
-            callbacks=[StreamingTokenCallback(event_queue=event_queue, company_name=company_name)]
+            callbacks=[CleanEventCallback(event_queue=event_queue)]
         )
     except Exception as e:
         print(f"Error initializing Azure LLM: {str(e)}")
         raise e
 
-llm = get_azure_llm()
 
+print("Authenticating with Azure KeyVault...")
+llm = get_azure_llm()
+print("Azure OpenAI LLM Initialized")
+
+# ============================================================================
+# GLOBAL STATE FOR ANALYSIS WORKFLOW
+# ============================================================================
 
 tool_output_capture = {"last_json": None}
 event_queue_global = None
@@ -225,7 +239,7 @@ Return a strictly valid JSON object. Do not include markdown formatting, "```jso
     """)
 
     try:
-        llm_instance = get_azure_llm(event_queue=event_queue_global, company_name=company_name)
+        llm_instance = get_azure_llm(event_queue=event_queue_global)
 
         response = (prompt | llm_instance).invoke({
             "company_name": company_name,
@@ -303,12 +317,16 @@ Provide the tool with the company name, company risks JSON, and mandate requirem
     llm_with_streaming = get_azure_llm(event_queue=event_queue)
     agent = create_tool_calling_agent(llm_with_streaming, tools, agent_prompt)
 
+    # Create callbacks for agent executor (for tool_start, agent_action, etc)
+    agent_callbacks = [CleanEventCallback(event_queue=event_queue)]
+
     agent_executor = AgentExecutor(
         agent=agent,
         tools=tools,
         verbose=True,
         max_iterations=10,
-        handle_parsing_errors=True
+        handle_parsing_errors=True,
+        callbacks=agent_callbacks
     )
 
     return agent_executor
@@ -347,8 +365,7 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
     if event_queue:
         event_queue.put({
             "type": "session_start",
-            "subprocess": "Risk Assessment of Investment Ideas",
-            "message": f"Starting Risk Assessment of Investment Ideas for {len(companies)} companies",
+            "message": "Risk Assessment Agent initialized",
             "companies_count": len(companies),
             "timestamp": datetime.now().isoformat()
         })
@@ -366,24 +383,6 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
 
             print(f"\nProcessing {company_name}...")
 
-            if event_queue:
-                event_queue.put({
-                    "type": "analysis_start",
-                    "subprocess": "Risk Assessment of Investment Ideas",
-                    "company_name": company_name,
-                    "message": f"Starting analysis for {company_name}",
-                    "timestamp": datetime.now().isoformat()
-                })
-
-            if event_queue:
-                event_queue.put({
-                    "type": "thinking_session_start",
-                    "subprocess": "Risk Assessment of Investment Ideas",
-                    "company_name": company_name,
-                    "message": f"Beginning risk analysis thinking process",
-                    "timestamp": datetime.now().isoformat()
-                })
-
             tool_output_capture["last_json"] = None
 
             task = f"""
@@ -398,44 +397,19 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
 
             response = agent_executor.invoke({"input": task})
 
-            if event_queue:
-                event_queue.put({
-                    "type": "thinking_session_end",
-                    "subprocess": "Risk Assessment of Investment Ideas",
-                    "company_name": company_name,
-                    "message": f"Completed thinking process",
-                    "timestamp": datetime.now().isoformat()
-                })
-
             if tool_output_capture["last_json"]:
                 result = tool_output_capture["last_json"]
                 all_results.append(result)
 
                 overall_status = result.get('overall_assessment', {}).get('status', 'UNKNOWN')
+
                 print(f"Result for {result['company_name']}: {overall_status}")
 
-                for param_name, param_analysis in result.get('parameter_analysis', {}).items():
-                    if event_queue:
-                        event_queue.put({
-                            "type": "parameter_analysis",
-                            "subprocess": "Risk Assessment of Investment Ideas",
-                            "company_name": result['company_name'],
-                            "parameter": param_name,
-                            "status": param_analysis.get('status', 'UNKNOWN'),
-                            "reason": param_analysis.get('reason', ''),
-                            "timestamp": datetime.now().isoformat()
-                        })
-
                 if event_queue:
-                    overall_assessment = result.get('overall_assessment', {})
                     event_queue.put({
                         "type": "analysis_complete",
-                        "subprocess": "Risk Assessment of Investment Ideas",
                         "company_name": result['company_name'],
-                        "overall_status": overall_assessment.get('status', 'UNKNOWN'),
-                        "overall_reason": overall_assessment.get('reason', ''),
-                        "parameter_analysis": result.get('parameter_analysis', {}),
-                        "message": f"Risk Assessment of Investment Ideas completed",
+                        "overall_result": overall_status,
                         "timestamp": datetime.now().isoformat()
                     })
             else:
@@ -443,22 +417,43 @@ def run_risk_assessment_sync(data: Dict[str, Any], event_queue=None) -> List[Dic
 
         except Exception as e:
             print(f"Error processing {company_name}: {str(e)}")
-            all_results.append({
+            error_result = {
                 "company_name": company_name,
-                "overall_status": "UNSAFE",
-                "overall_reason": "Analysis failed"
-            })
+                "overall_assessment": {
+                    "status": "UNSAFE",
+                    "reason": "Analysis failed"
+                },
+                "parameter_analysis": {}
+            }
+            all_results.append(error_result)
 
-    print(f"\nRisk Assessment of Investment Ideas completed for {len(all_results)} companies")
+            if event_queue:
+                event_queue.put({
+                    "type": "analysis_complete",
+                    "company_name": company_name,
+                    "overall_result": "UNSAFE",
+                    "timestamp": datetime.now().isoformat()
+                })
+
+    print(f"\nRisk Assessment completed for {len(all_results)} companies")
 
     if event_queue:
+        # Transform results to replace overall_assessment with overall_result
+        transformed_results = []
+        for result in all_results:
+            transformed = {
+                "company_name": result.get('company_name'),
+                "parameter_analysis": result.get('parameter_analysis', {}),
+                "overall_result": result.get('overall_assessment', {}).get('status', 'UNKNOWN')
+            }
+            transformed_results.append(transformed)
+
         event_queue.put({
             "type": "session_complete",
-            "subprocess": "Risk Assessment of Investment Ideas",
             "status": "success",
-            "message": f"Risk Assessment of Investment Ideas completed for all companies",
-            "total_companies": len(all_results),
-            "results": all_results,
+            "message": "Risk Assessment Agent session finished!",
+            "companies_analyzed": len(all_results),
+            "results": transformed_results,
             "timestamp": datetime.now().isoformat()
         })
         event_queue.put(None)

@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API } from '../utils/constants';
-import { FiUpload, FiSend, FiFile, FiTrash, FiChevronDown, FiChevronUp, FiChevronLeft, FiChevronRight, FiMessageSquare, FiX, FiChevronRight as FiArrowRight } from 'react-icons/fi';
+import { FiUpload, FiSend, FiFile, FiTrash, FiChevronDown, FiChevronUp, FiChevronLeft, FiChevronRight, FiMessageSquare, FiX, FiChevronRight as FiArrowRight, FiPlus } from 'react-icons/fi';
 import { Skeleton } from '@mui/material';
 import toast from 'react-hot-toast';
+import LogoAnimated from '../assets/logo-animated.svg';
 
 const FundMandate: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -24,6 +25,12 @@ const FundMandate: React.FC = () => {
   const [editedSourcingParams, setEditedSourcingParams] = useState<Record<string, string>>({});
   const [editedScreeningParams, setEditedScreeningParams] = useState<Record<string, string>>({});
   const [editedRiskParams, setEditedRiskParams] = useState<Record<string, string>>({});
+
+  const [addParamModalOpen, setAddParamModalOpen] = useState(false);
+  const [addParamSection, setAddParamSection] = useState<'sourcing' | 'screening' | 'risk' | null>(null);
+  const [addParamSubprocessName, setAddParamSubprocessName] = useState('');
+  const [newParamName, setNewParamName] = useState('');
+  const [newParamValue, setNewParamValue] = useState('');
 
   // Streaming state
   const [streamingEvents, setStreamingEvents] = useState<any[]>([]);
@@ -93,6 +100,64 @@ const FundMandate: React.FC = () => {
       ...prev,
       [section]: !prev[section],
     }));
+  };
+
+  const handleOpenAddParamModal = (section: 'sourcing' | 'screening' | 'risk', subprocessName: string) => {
+    setAddParamSection(section);
+    setNewParamName('');
+    setAddParamSubprocessName(subprocessName);
+    setNewParamValue('');
+    setAddParamModalOpen(true);
+  };
+
+  const handleAddParameter = () => {
+    if (!newParamName.trim()) {
+      toast.error('Please enter a parameter name');
+      return;
+    }
+
+    if (!addParamSection) {
+      return;
+    }
+
+    const paramKey = newParamName.trim();
+    const paramValue = newParamValue.trim();
+
+    if (addParamSection === 'sourcing') {
+      setEditedSourcingParams(prev => ({ ...prev, [paramKey]: paramValue }));
+    } else if (addParamSection === 'screening') {
+      setEditedScreeningParams(prev => ({ ...prev, [paramKey]: paramValue }));
+    } else if (addParamSection === 'risk') {
+      setEditedRiskParams(prev => ({ ...prev, [paramKey]: paramValue }));
+    }
+
+    toast.success(`Parameter "${paramKey}" added successfully`);
+    setAddParamModalOpen(false);
+    setNewParamName('');
+    setNewParamValue('');
+  };
+
+  const handleDeleteParameter = (section: 'sourcing' | 'screening' | 'risk', paramKey: string) => {
+    if (section === 'sourcing') {
+      setEditedSourcingParams(prev => {
+        const updated = { ...prev };
+        delete updated[paramKey];
+        return updated;
+      });
+    } else if (section === 'screening') {
+      setEditedScreeningParams(prev => {
+        const updated = { ...prev };
+        delete updated[paramKey];
+        return updated;
+      });
+    } else if (section === 'risk') {
+      setEditedRiskParams(prev => {
+        const updated = { ...prev };
+        delete updated[paramKey];
+        return updated;
+      });
+    }
+    toast.success(`Parameter "${paramKey}" deleted`);
   };
 
   const validateFile = (file: File) => {
@@ -526,10 +591,78 @@ const FundMandate: React.FC = () => {
         <div className="fixed inset-0 flex items-center justify-center z-[999]">
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md z-[999] overflow-hidden flex flex-col items-center justify-center p-8">
-            <div className="animate-spin mb-6">
-              <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full" />
+            <div className="mb-6">
+              <img src={LogoAnimated} alt="Loading" className="w-16 h-16" />
             </div>
             <p className="text-gray-700 font-medium text-center">User intent is getting analyzed by Capability Compass</p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const AddParameterModal = () => (
+    <>
+      {addParamModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center z-[999]">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setAddParamModalOpen(false)} />
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md z-[999] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="border-b border-gray-100 px-6 py-4 bg-gray-50 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-gray-900">
+                Add Parameter to {addParamSubprocessName}
+              </h2>
+              <button
+                onClick={() => setAddParamModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Parameter Name
+                </label>
+                <input
+                  type="text"
+                  value={newParamName}
+                  onChange={(e) => setNewParamName(e.target.value)}
+                  placeholder="e.g., Min Fund Size"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Parameter Value
+                </label>
+                <input
+                  type="text"
+                  value={newParamValue}
+                  onChange={(e) => setNewParamValue(e.target.value)}
+                  placeholder="e.g., $100M"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="border-t border-gray-100 px-6 py-4 bg-gray-50 flex items-center gap-3">
+              <button
+                onClick={() => setAddParamModalOpen(false)}
+                className="flex-1 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddParameter}
+                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+              >
+                Add Parameter
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -608,6 +741,8 @@ const FundMandate: React.FC = () => {
       <AnalyzingOverlay />
       {/* Capabilities Modal */}
       <CapabilitiesModal />
+      {/* Add Parameter Modal */}
+      <AddParameterModal />
       {/* Header */}
       <header className="border-b sticky top-0 bg-background/95 bg-white z-50">
         <div className="container mx-auto px-6 py-4">
@@ -909,52 +1044,89 @@ const FundMandate: React.FC = () => {
                           {subprocess.category && (
                             <span className="text-xs text-gray-500 ml-auto bg-gray-100 px-2 py-1 rounded">{subprocess.category}</span>
                           )}
-                        </button>
+                              <button
+                                onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenAddParamModal(index === 0 ? 'sourcing' : index === 1 ? 'screening' : 'risk', subprocess.name);
+                            }}
+                            className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
+                            title="Add parameter"
+                          >
+                            <FiPlus className="w-4 h-4" />
+                              </button>
+
+                              </button>
                         {openSections[subprocess.id] && (
                           <div className="py-6 animate-in fade-in slide-in-from-top-1 duration-300">
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                              {index === 0 && getMandatoryThresholds().map((threshold) => (
-                                <div key={threshold.key} className="flex flex-col gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors">
-                                  <div className="flex items-center gap-2">
+                             <>
+                              {index === 0 && Object.entries(editedSourcingParams).map(([key, value]) => (
+                                  <div key={key} className="flex flex-col gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors group">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 flex-1 min-w-0">
                                     <span className="w-2 h-2 bg-indigo-400 rounded-full flex-shrink-0" />
-                                    <label className="text-sm font-semibold text-gray-800">{threshold.key}</label>
+                                    <label className="text-sm font-semibold text-gray-800 truncate">{key}</label>
+                                      </div>
+                                      <button
+                                        onClick={() => handleDeleteParameter('sourcing', key)}
+                                        className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
+                                      >
+                                        <FiTrash className="w-4 h-4" />
+                                      </button>
                                   </div>
                                   <input
                                     type="text"
-                                    value={editedSourcingParams[threshold.key] || ''}
-                                    onChange={(e) => setEditedSourcingParams(prev => ({ ...prev, [threshold.key]: e.target.value }))}
+                                    value={value}
+                                      onChange={(e) => setEditedSourcingParams(prev => ({ ...prev, [key]: e.target.value }))}
                                     className="text-sm px-2 py-1 border border-gray-200 rounded bg-gray-50 focus:bg-white focus:border-indigo-400 focus:outline-none"
                                   />
                                 </div>
                               ))}
-                              {index === 1 && getPreferredMetrics().map((metric) => (
-                                <div key={metric.key} className="flex flex-col gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors">
-                                  <div className="flex items-center gap-2">
+                              {index === 1 && Object.entries(editedScreeningParams).map(([key, value]) => (
+                                  <div key={key} className="flex flex-col gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors group">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 flex-1 min-w-0">
                                     <span className="w-2 h-2 bg-indigo-400 rounded-full flex-shrink-0" />
-                                    <label className="text-sm font-semibold text-gray-800">{metric.key}</label>
+                                    <label className="text-sm font-semibold text-gray-800 truncate">{key}</label>
+                                      </div>
+                                      <button
+                                        onClick={() => handleDeleteParameter('screening', key)}
+                                        className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
+                                      >
+                                        <FiTrash className="w-4 h-4" />
+                                      </button>
                                   </div>
                                   <input
                                     type="text"
-                                    value={editedScreeningParams[metric.key] || ''}
-                                    onChange={(e) => setEditedScreeningParams(prev => ({ ...prev, [metric.key]: e.target.value }))}
+                                    value={value}
+                                      onChange={(e) => setEditedScreeningParams(prev => ({ ...prev, [key]: e.target.value }))}
                                     className="text-sm px-2 py-1 border border-gray-200 rounded bg-gray-50 focus:bg-white focus:border-indigo-400 focus:outline-none"
                                   />
                                 </div>
                               ))}
-                              {index === 2 && getRiskFactors().map((factor) => (
-                                <div key={factor.key} className="flex flex-col gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors">
-                                  <div className="flex items-center gap-2">
+                              {index === 2 && Object.entries(editedRiskParams).map(([key, value]) => (
+                                  <div key={key} className="flex flex-col gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors group">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 flex-1 min-w-0">
                                     <span className="w-2 h-2 bg-indigo-400 rounded-full flex-shrink-0" />
-                                    <label className="text-sm font-semibold text-gray-800">{factor.key}</label>
+                                    <label className="text-sm font-semibold text-gray-800 truncate">{key}</label>
+                                      </div>
+                                      <button
+                                        onClick={() => handleDeleteParameter('risk', key)}
+                                        className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
+                                      >
+                                        <FiTrash className="w-4 h-4" />
+                                      </button>
                                   </div>
                                   <input
                                     type="text"
-                                    value={editedRiskParams[factor.key] || ''}
-                                    onChange={(e) => setEditedRiskParams(prev => ({ ...prev, [factor.key]: e.target.value }))}
+                                    value={value}
+                                      onChange={(e) => setEditedRiskParams(prev => ({ ...prev, [key]: e.target.value }))}
                                     className="text-sm px-2 py-1 border border-gray-200 rounded bg-gray-50 focus:bg-white focus:border-indigo-400 focus:outline-none"
                                   />
                                 </div>
                               ))}
+                              </>
                             </div>
                           </div>
                         )}
