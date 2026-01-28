@@ -464,7 +464,7 @@ const SourcingAgent: React.FC = () => {
                 return {
                   company_name: c.company_name || c.Company || c.company || 'Unknown',
                   risk_scores,
-                  overall_status: c.overall_status || c.overallStatus || c.overall || ''
+                  overall_status: c.overall_assessment || c.overall_result || c.overall_status || c.overallStatus || c.overall || ''
                 };
               });
 
@@ -1346,51 +1346,70 @@ const SourcingAgent: React.FC = () => {
       <Dialog
         open={companyDetailOpen}
         onClose={closeCompanyDetail}
-        maxWidth="sm"
-        PaperProps={{ sx: { maxHeight: '350px', width: '350px' } }}
+        maxWidth="md"
+        PaperProps={{ sx: { maxHeight: '85vh', width: '600px', borderRadius: '12px' } }}
       >
-        <DialogTitle className="font-bold text-sm py-2">
+        <DialogTitle sx={{ 
+          fontWeight: 'bold', 
+          fontSize: '1.25rem', 
+          padding: '20px', 
+          background: '#FFFFFF',
+          color: '#1F2937',
+          borderBottom: '1px solid #E5E7EB',
+          borderRadius: '12px 12px 0 0'
+        }}>
           {selectedCompanyDetail?.['Company '] || selectedCompanyDetail?.['Company'] || 'Company Details'}
         </DialogTitle>
-        <DialogContent dividers sx={{ padding: '12px', overflowY: 'auto' }}>
+        <DialogContent sx={{ padding: '24px', overflowY: 'auto', maxHeight: 'calc(85vh - 130px)' }}>
           {selectedCompanyDetail && (
-            <div className="space-y-2">
-              {Object.entries(selectedCompanyDetail).map(([key, value]: [string, any]) => {
-                // Skip Risks as we'll handle it separately
-                if (key === 'Risks' || key === 'risks') {
-                  return null;
-                }
-                return (
-                  <div key={key} className="flex border-b border-gray-100 pb-1">
-                    <span className="font-medium text-gray-700 w-1/3 text-xs">{key}:</span>
-                    <span className="text-gray-900 w-2/3 text-xs">{formatValue(value)}</span>
-                  </div>
-                );
-              })}
+            <div className="space-y-6">
+              {/* Company Attributes Grid */}
+              <div className="grid grid-cols-3 gap-4">
+                {Object.entries(selectedCompanyDetail).map(([key, value]: [string, any]) => {
+                  // Skip Risks as we'll handle it separately
+                  if (key === 'Risks' || key === 'risks' || key === 'Company ' || key === 'Company') {
+                    return null;
+                  }
+                  return (
+                    <div key={key} className="bg-gray-50 rounded-lg p-3 border border-gray-200 hover:border-gray-300 transition-colors">
+                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">{key}</div>
+                      <div className="text-sm font-medium text-gray-900">{formatValue(value)}</div>
+                    </div>
+                  );
+                })}
+              </div>
 
               {/* Display Risks if available */}
               {(selectedCompanyDetail?.['Risks'] || selectedCompanyDetail?.['risks']) && (
-                <div className="mt-3 pt-2 border-t border-gray-200">
-                  <div className="font-bold text-xs text-gray-800 mb-2">Risks:</div>
-                  <div className="space-y-1 pl-2">
-                    {Object.entries(selectedCompanyDetail['Risks'] || selectedCompanyDetail['risks']).map(([riskKey, riskValue]: [string, any]) => (
-                      <div key={riskKey} className="border-b border-gray-100 pb-1">
-                        <span className="font-medium text-gray-700 text-xs">{riskKey}:</span>
-                        <div className="text-gray-900 text-xs mt-0.5 ml-2">{formatValue(riskValue)}</div>
-                      </div>
-                    ))}
+                <div className="mt-2 pt-6 border-t border-gray-200">
+                  <div className="text-lg font-bold text-gray-900 mb-4">Risk Assessment</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {Object.entries(selectedCompanyDetail['Risks'] || selectedCompanyDetail['risks']).map(([riskKey, riskValue]: [string, any]) => {
+                      return (
+                        <div key={riskKey} className="rounded-lg p-3 border border-gray-200 bg-gray-50">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="font-semibold text-sm text-gray-800">{riskKey}</div>
+                              <div className="text-sm font-medium mt-1 text-gray-700">
+                                {formatValue(riskValue)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
             </div>
           )}
         </DialogContent>
-        <DialogActions sx={{ padding: '8px 12px' }}>
+        <DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E7EB' }}>
           <Button
             onClick={closeCompanyDetail}
             variant="contained"
             size="small"
-            sx={{ backgroundColor: '#4F46E5', '&:hover': { backgroundColor: '#4338CA' }, textTransform: 'none' }}
+            sx={{ backgroundColor: '#4F46E5', '&:hover': { backgroundColor: '#4338CA' }, textTransform: 'none', borderRadius: '6px', fontWeight: '500' }}
           >
             Close
           </Button>
